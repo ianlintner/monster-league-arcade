@@ -72,6 +72,8 @@ export function digitalDirection(up: boolean, down: boolean, left: boolean, righ
   return mag === 0 ? { x: 0, y: 0 } : { x: x / mag, y: y / mag };
 }
 
+const ALL_MAPPED_CODES = new Set(Object.values(KEY_MAPS).flatMap((m) => Object.values(m).flat()));
+
 export class InputManager {
   private keys = new Set<string>();
   private touch: Record<PlayerIndex, Set<string>> = { 0: new Set(), 1: new Set() };
@@ -79,6 +81,9 @@ export class InputManager {
 
   private onKeyDown = (e: KeyboardEvent): void => {
     this.keys.add(e.code);
+    const tag = (e.target as HTMLElement | null)?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (ALL_MAPPED_CODES.has(e.code)) e.preventDefault();
   };
   private onKeyUp = (e: KeyboardEvent): void => {
     this.keys.delete(e.code);
@@ -125,8 +130,8 @@ export class InputManager {
   private gamepadFor(player: PlayerIndex): Gamepad | null {
     if (typeof navigator === 'undefined' || typeof navigator.getGamepads !== 'function')
       return null;
-    const pads = Array.from(navigator.getGamepads()).filter((p): p is Gamepad => p !== null);
-    return pads[player] ?? null;
+    const pads = navigator.getGamepads();
+    return pads?.[player] ?? null;
   }
 
   poll(player: PlayerIndex): InputSnapshot {

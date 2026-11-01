@@ -35,4 +35,28 @@ describe('InputManager', () => {
     expect(im.poll(0).buttons.START).toBe(true);
     im.detach();
   });
+
+  it('prevents default scroll on mapped keys only', () => {
+    const im = new InputManager();
+    im.attach(window);
+    const space = new KeyboardEvent('keydown', { code: 'Space', cancelable: true });
+    window.dispatchEvent(space);
+    expect(space.defaultPrevented).toBe(true);
+    const other = new KeyboardEvent('keydown', { code: 'KeyQ', cancelable: true });
+    window.dispatchEvent(other);
+    expect(other.defaultPrevented).toBe(false);
+    im.detach();
+  });
+
+  it('indexes gamepads by slot without compacting', () => {
+    const pad = { buttons: [], axes: [1, 0] } as unknown as Gamepad;
+    Object.defineProperty(navigator, 'getGamepads', {
+      configurable: true,
+      value: () => [null, pad],
+    });
+    const im = new InputManager();
+    expect(im.poll(0).x).toBe(0);
+    expect(im.poll(1).x).toBe(1);
+    Object.defineProperty(navigator, 'getGamepads', { configurable: true, value: undefined });
+  });
 });

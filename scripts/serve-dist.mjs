@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
-import { extname, join, normalize, resolve } from 'node:path';
+import { extname, join, resolve } from 'node:path';
+import { resolveInside } from './resolve-inside.mjs';
 import { fileURLToPath } from 'node:url';
 
 const dist = resolve(fileURLToPath(new URL('../dist', import.meta.url)));
@@ -17,8 +18,8 @@ const types = {
 createServer(async (req, res) => {
   try {
     const path = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname);
-    let file = normalize(join(dist, path));
-    if (!file.startsWith(dist)) throw new Error('forbidden');
+    let file = resolveInside(dist, path);
+    if (!file) throw new Error('forbidden');
     const s = await stat(file).catch(() => null);
     if (s?.isDirectory()) file = join(file, 'index.html');
     const body = await readFile(file);

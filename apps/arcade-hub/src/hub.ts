@@ -10,9 +10,11 @@ const detail = document.getElementById('faction-detail');
 function showFaction(f: Faction): void {
   if (!detail) return;
   detail.replaceChildren();
-  const dl = el('dl', 'gsn-kv');
+  const dl = el('dl');
   const row = (k: string, v: string): void => {
-    dl.append(el('dt', undefined, k), el('dd', undefined, v));
+    const r = el('div', 'gsn-kv');
+    r.append(el('dt', undefined, k), el('dd', undefined, v));
+    dl.append(r);
   };
   row('Team', f.name);
   row('Species', f.species);
@@ -70,20 +72,20 @@ for (let i = 0; i < 9; i++) {
 const input = new InputManager();
 input.attach(window);
 function tick(): void {
+  const activeCells = new Set<number>();
+  for (const node of keys.values()) node.dataset.active = 'false';
   for (const player of [0, 1] as const) {
     const s = input.poll(player);
-    const col = s.x > 0.3 ? 2 : s.x < -0.3 ? 0 : 1;
-    const rowIdx = s.y > 0.3 ? 2 : s.y < -0.3 ? 0 : 1;
-    if (player === 0)
-      cells.forEach(
-        (c, i) => (c.dataset.active = String(i === rowIdx * 3 + col && (s.x !== 0 || s.y !== 0))),
-      );
+    if (s.x !== 0 || s.y !== 0) {
+      const col = s.x > 0.3 ? 2 : s.x < -0.3 ? 0 : 1;
+      const rowIdx = s.y > 0.3 ? 2 : s.y < -0.3 ? 0 : 1;
+      activeCells.add(rowIdx * 3 + col);
+    }
     for (const [name, node] of keys) {
-      const on = s.buttons[name as 'A' | 'B' | 'C' | 'START'];
-      if (player === 0) node.dataset.active = String(on);
-      else if (on) node.dataset.active = 'true';
+      if (s.buttons[name as 'A' | 'B' | 'C' | 'START']) node.dataset.active = 'true';
     }
   }
+  cells.forEach((c, i) => (c.dataset.active = String(activeCells.has(i))));
   requestAnimationFrame(tick);
 }
 tick();

@@ -6,7 +6,7 @@
   "description": "Monster League Arcade — retro-modern Halloween sports arcade (Phaser 4 + TypeScript + Vite) on Azure Static Web Apps.",
   "license": "MIT",
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=22.12.0"
   },
   "workspaces": [
     "packages/*",
