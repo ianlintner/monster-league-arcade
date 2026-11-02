@@ -48,6 +48,33 @@ describe('InputManager', () => {
     im.detach();
   });
 
+  it('does not block native activation on interactive elements', () => {
+    const im = new InputManager();
+    im.attach(window);
+    const btn = document.createElement('button');
+    const a = document.createElement('a');
+    a.href = '#x';
+    const canvas = document.createElement('canvas');
+    document.body.append(btn, a, canvas);
+    const fire = (el: Element, code: string) => {
+      const ev = new KeyboardEvent('keydown', { code, bubbles: true, cancelable: true });
+      el.dispatchEvent(ev);
+      return ev.defaultPrevented;
+    };
+    for (const code of ['Space', 'Enter']) {
+      expect(fire(btn, code)).toBe(false);
+      expect(fire(a, code)).toBe(false);
+    }
+    for (const code of ['Space', 'ArrowUp', 'ArrowDown']) {
+      expect(fire(document.body, code)).toBe(true);
+      expect(fire(canvas, code)).toBe(true);
+    }
+    btn.remove();
+    a.remove();
+    canvas.remove();
+    im.detach();
+  });
+
   it('indexes gamepads by slot without compacting', () => {
     const pad = { buttons: [], axes: [1, 0] } as unknown as Gamepad;
     Object.defineProperty(navigator, 'getGamepads', {

@@ -74,6 +74,16 @@ export function digitalDirection(up: boolean, down: boolean, left: boolean, righ
 
 const ALL_MAPPED_CODES = new Set(Object.values(KEY_MAPS).flatMap((m) => Object.values(m).flat()));
 
+const INTERACTIVE_SELECTOR =
+  'input, textarea, select, button, a[href], summary, [role="button"], [role="link"], [contenteditable=""], [contenteditable="true"]';
+
+/** True when the key event target is a control with native keyboard behaviour. */
+export function isInteractiveOrEditableTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el || typeof el.closest !== 'function') return false;
+  return el.isContentEditable === true || el.closest(INTERACTIVE_SELECTOR) !== null;
+}
+
 export class InputManager {
   private keys = new Set<string>();
   private touch: Record<PlayerIndex, Set<string>> = { 0: new Set(), 1: new Set() };
@@ -81,8 +91,7 @@ export class InputManager {
 
   private onKeyDown = (e: KeyboardEvent): void => {
     this.keys.add(e.code);
-    const tag = (e.target as HTMLElement | null)?.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (isInteractiveOrEditableTarget(e.target)) return;
     if (ALL_MAPPED_CODES.has(e.code)) e.preventDefault();
   };
   private onKeyUp = (e: KeyboardEvent): void => {
