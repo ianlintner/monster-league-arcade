@@ -1,0 +1,24 @@
+{
+  "name": "@monster-league/arcade-hub",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "GSN 66.6 Monster League Arcade multi-page Vite build: cabinet hub (/), football (/football/) and hockey (/hockey/).",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@monster-league/football": "0.1.0",
+    "@monster-league/hockey": "0.1.0",
+    "@monster-league/shared-core": "0.1.0",
+    "phaser": "4.2.1"
+  },
+  "devDependencies": {
+    "vite": "8.3.5"
+  }
+}

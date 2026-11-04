@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GSN 66.6 — Monster League Arcade</title>
+  </head>
+  <body>
+    <div class="gsn-chrome" data-testid="gsn-chrome">
+      <header class="gsn-header">
+        <h1 class="gsn-brand">GSN 66.6</h1>
+        <span class="gsn-brand__sub">Graveyard Sports Network · Monster League Arcade Cabinet</span>
+      </header>
+      <p class="gsn-tagline">
+        Pick your sport, inspect the four monster factions and test your controller. Broadcasting
+        live from beyond the grave.
+      </p>
+      <div class="gsn-toolbar">
+        <button class="gsn-btn" type="button" data-crt-toggle aria-pressed="false">
+          CRT Scanlines
+        </button>
+      </div>
+      <section class="gsn-grid" aria-label="Games">
+        <article class="gsn-panel gsn-card">
+          <span class="gsn-card__kicker">Gridiron · 7v7</span>
+          <h2 class="gsn-card__title">Halloween Monster League Football</h2>
+          <p class="gsn-card__blurb">Nasty Audibles, Bribe the Ref and Forfeit by Carnage.</p>
+          <a class="gsn-btn gsn-btn--cta" href="/football/" data-testid="card-football"
+            >Play Football</a
+          >
+        </article>
+        <article class="gsn-panel gsn-card">
+          <span class="gsn-card__kicker">Ice · 5v5</span>
+          <h2 class="gsn-card__title">Monster League Hockey</h2>
+          <p class="gsn-card__blurb">Frozen-crypt rink preview. Puck-first mayhem is coming.</p>
+          <a class="gsn-btn gsn-btn--cta" href="/hockey/" data-testid="card-hockey">Play Hockey</a>
+        </article>
+      </section>
+      <section class="gsn-grid" style="margin-top: 18px">
+        <div class="gsn-panel">
+          <h2 class="gsn-panel__title">Faction Roster</h2>
+          <div class="gsn-roster" id="roster" data-testid="roster"></div>
+          <div id="faction-detail" data-testid="faction-detail"></div>
+        </div>
+        <div class="gsn-panel">
+          <h2 class="gsn-panel__title">Controller Tester</h2>
+          <p class="gsn-card__blurb">
+            P1: WASD + J/K/L + P · P2: Arrows + Z/X/C + Enter · Gamepad supported.
+          </p>
+          <div class="gsn-dpad" id="dpad"></div>
+          <div class="gsn-pad" id="pad" data-testid="pad"></div>
+        </div>
+      </section>
+    </div>
+    <script type="module" src="/src/hub.ts"></script>
+  </body>
+</html>

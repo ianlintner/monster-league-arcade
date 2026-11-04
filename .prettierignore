@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+package-lock.json
+# Design bible, hand-formatted with wide markdown tables.
+PLAN.md

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GSN 66.6 — Monster League Hockey</title>
+  </head>
+  <body>
+    <div class="gsn-chrome" data-testid="gsn-chrome">
+      <header class="gsn-header">
+        <h1 class="gsn-brand">GSN 66.6</h1>
+        <span class="gsn-brand__sub">Monster League Hockey</span>
+      </header>
+      <div class="gsn-toolbar">
+        <a class="gsn-btn" href="/" data-testid="back-hub">Arcade Hub</a>
+        <button class="gsn-btn" type="button" data-crt-toggle aria-pressed="false">
+          CRT Scanlines
+        </button>
+      </div>
+      <div id="scorebug" data-testid="scorebug"></div>
+      <div class="gsn-stage">
+        <div class="gsn-canvas-bezel" id="game" data-testid="game"></div>
+      </div>
+      <div class="gsn-banner" id="banner"></div>
+      <div class="gsn-control-bar" data-testid="control-bar">
+        <span class="gsn-control-bar__prompt"
+          >Move the mouse to drag the puck &nbsp; <b>[A]</b> Shoot &nbsp; <b>[B]</b> Check &nbsp;
+          <b>[C]</b> Turbo</span
+        >
+      </div>
+      <p class="gsn-visually-hidden">Frozen-crypt rink preview · 640x360</p>
+    </div>
+    <script type="module" src="/src/hockey.ts"></script>
+  </body>
+</html>

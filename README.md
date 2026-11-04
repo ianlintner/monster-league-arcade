@@ -2,7 +2,7 @@
 
 A retro-modern 16-bit/32-bit Halloween monster sports arcade hub for the web, built with **Phaser 4, TypeScript, and Vite** and hosted on **Azure Static Web Apps**.
 
-Inspired by the 1993 Sega Genesis classic *Mutant League Football* (and *Mutant League Hockey*) with modern arcade physics, lighting, and responsiveness inspired by *Tape to Tape*.
+Inspired by the 1993 Sega Genesis classic _Mutant League Football_ (and _Mutant League Hockey_) with modern arcade physics, lighting, and responsiveness inspired by _Tape to Tape_.
 
 ## Games & Routes
 
@@ -13,7 +13,7 @@ Inspired by the 1993 Sega Genesis classic *Mutant League Football* (and *Mutant 
 ## Status
 
 - **Phase**: MVP in active Kanban development (`monster-league-arcade` board).
-- **Architecture & Art Bible**: See [`PLAN.md`](./PLAN.md) for the complete clean-room specification, unified *16-Bit Midnight Broadcast* art/UI design system, and card roadmap.
+- **Architecture & Art Bible**: See [`PLAN.md`](./PLAN.md) for the complete clean-room specification, unified _16-Bit Midnight Broadcast_ art/UI design system, and card roadmap.
 
 ## License
 
