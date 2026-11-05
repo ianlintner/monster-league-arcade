@@ -67,3 +67,4 @@ export function bootFootball(parent: HTMLElement): Phaser.Game {
     scene: GridironScene,
   });
 }
+export * from './sim/index';
