@@ -1,0 +1,108 @@
+{
+  "sprites": {
+    "cell": 48,
+    "cols": 6,
+    "rows": 14,
+    "animations": [
+      {
+        "name": "idle_stance",
+        "firstRow": 0,
+        "rows": 1,
+        "frames": 4
+      },
+      {
+        "name": "run_8dir",
+        "firstRow": 1,
+        "rows": 8,
+        "frames": 6
+      },
+      {
+        "name": "pass_windup_throw",
+        "firstRow": 9,
+        "rows": 1,
+        "frames": 4
+      },
+      {
+        "name": "dive_tackle_lunge",
+        "firstRow": 10,
+        "rows": 1,
+        "frames": 3
+      },
+      {
+        "name": "hit_stagger_knockdown",
+        "firstRow": 11,
+        "rows": 1,
+        "frames": 4
+      },
+      {
+        "name": "casualty_death",
+        "firstRow": 12,
+        "rows": 1,
+        "frames": 6
+      },
+      {
+        "name": "celebration",
+        "firstRow": 13,
+        "rows": 1,
+        "frames": 4
+      }
+    ],
+    "run_8dir_order": [
+      "S",
+      "SE",
+      "E",
+      "NE",
+      "N",
+      "NW",
+      "W",
+      "SW"
+    ],
+    "sheets": [
+      "boneyard_reapers",
+      "rotting_deadskins",
+      "transylvania_nightstalkers",
+      "salem_bayou_ghouls",
+      "necro_ref",
+      "demon_ref"
+    ],
+    "crests": [
+      "boneyard_reapers",
+      "rotting_deadskins",
+      "transylvania_nightstalkers",
+      "salem_bayou_ghouls"
+    ]
+  },
+  "portraits": {
+    "cell": 64,
+    "frames": 2,
+    "ids": [
+      "coach_boneyard_reapers",
+      "coach_rotting_deadskins",
+      "coach_transylvania_nightstalkers",
+      "coach_salem_bayou_ghouls",
+      "necro_ref",
+      "demon_ref",
+      "crypt_announcer"
+    ]
+  },
+  "arenas": {
+    "tile": 64,
+    "hazardFrames": 4,
+    "hazards": {
+      "cursed_graveyard": [
+        "tombstones",
+        "grave_pit",
+        "jack_o_lantern_mine"
+      ],
+      "brimstone_hellfire_pit": [
+        "obsidian_cracks",
+        "lava_geyser"
+      ],
+      "ectoplasm_swamp": [
+        "sludge_puddle",
+        "bog_patch",
+        "fog"
+      ]
+    }
+  }
+}
