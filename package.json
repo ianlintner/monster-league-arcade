@@ -24,6 +24,8 @@
     "build": "npm run build -w @monster-league/arcade-hub",
     "preview": "npm run preview -w @monster-league/arcade-hub",
     "serve:dist": "node scripts/serve-dist.mjs",
+    "validate-audio": "node scripts/validate-audio.mjs",
+    "generate:announcer": "node scripts/generate-announcer.mjs",
     "e2e": "playwright test",
     "e2e:report": "playwright show-report"
   },
