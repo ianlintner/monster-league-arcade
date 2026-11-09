@@ -46,6 +46,10 @@ export interface AudioManagerOptions {
   /** Decodes + plays an announcer clip. Resolves false if unavailable so the fallback runs. */
   playClip?: (url: string, ctx: AudioContext, dest: AudioNode) => Promise<boolean>;
   seed?: number;
+  /** Frame scheduler for the gamepad unlock poll; injectable for tests. */
+  raf?: (cb: FrameRequestCallback) => number;
+  cancelRaf?: (id: number) => void;
+  getGamepads?: () => ReadonlyArray<Gamepad | null>;
 }
 
 function safeStorage(): StorageLike | null {
@@ -85,6 +89,28 @@ async function defaultPlayClip(url: string, ctx: AudioContext, dest: AudioNode):
   }
 }
 
+function defaultRaf(cb: FrameRequestCallback): number {
+  const g = globalThis as { requestAnimationFrame?: (cb: FrameRequestCallback) => number };
+  if (typeof g.requestAnimationFrame === 'function') return g.requestAnimationFrame(cb);
+  return setTimeout(() => cb(0), 250) as unknown as number;
+}
+
+function defaultCancelRaf(id: number): void {
+  const g = globalThis as { cancelAnimationFrame?: (id: number) => void };
+  if (typeof g.cancelAnimationFrame === 'function') g.cancelAnimationFrame(id);
+  else clearTimeout(id);
+}
+
+function defaultGetGamepads(): ReadonlyArray<Gamepad | null> {
+  const g = globalThis as { navigator?: { getGamepads?: () => (Gamepad | null)[] } };
+  if (!g.navigator || typeof g.navigator.getGamepads !== 'function') return [];
+  try {
+    return g.navigator.getGamepads();
+  } catch {
+    return [];
+  }
+}
+
 const UNLOCK_EVENTS = ['keydown', 'pointerdown', 'click', 'touchstart', 'gamepadconnected'];
 
 /** Unified audio facade: volumes, mute, persistence, autoplay unlock, BGM/SFX/voice. */
@@ -103,8 +129,25 @@ export class AudioManager {
   private readonly createContext: () => AudioContext | null;
   private readonly playClipImpl: NonNullable<AudioManagerOptions['playClip']>;
   private readonly seed: number | undefined;
+  private readonly raf: (cb: FrameRequestCallback) => number;
+  private readonly cancelRaf: (id: number) => void;
+  private readonly getGamepads: () => ReadonlyArray<Gamepad | null>;
+  private disposed = false;
+  private gamepadRafId: number | null = null;
+  private activeUtterance: SpeechSynthesisUtterance | null = null;
   private readonly unlockHandler = (): void => {
     void this.unlock();
+  };
+  private readonly gamepadTick = (): void => {
+    this.gamepadRafId = null;
+    if (this.disposed || this.unlocked) return;
+    if (this.anyGamepadActivity()) {
+      void this.unlock().then((ok) => {
+        if (!ok) return; // no Web Audio available; stop polling
+      });
+      return;
+    }
+    this.gamepadRafId = this.raf(this.gamepadTick);
   };
 
   constructor(opts: AudioManagerOptions = {}) {
@@ -112,6 +155,9 @@ export class AudioManager {
     this.createContext = opts.createContext ?? defaultCreateContext;
     this.playClipImpl = opts.playClip ?? defaultPlayClip;
     this.seed = opts.seed;
+    this.raf = opts.raf ?? defaultRaf;
+    this.cancelRaf = opts.cancelRaf ?? defaultCancelRaf;
+    this.getGamepads = opts.getGamepads ?? defaultGetGamepads;
     let raw: string | null = null;
     try {
       raw = this.storage?.getItem(AUDIO_STORAGE_KEY) ?? null;
@@ -159,7 +205,13 @@ export class AudioManager {
       /* storage full / denied: keep in-memory state */
     }
     this.applyGains();
+    if (this.effectiveSfxGain() <= 0) this.cancelSpeech();
     for (const l of this.listeners) l(this.getSettings());
+  }
+
+  /** Effective SFX gain after master volume and mute (mirrors the Web Audio gain graph). */
+  private effectiveSfxGain(): number {
+    return this.settings.muted ? 0 : this.settings.master * this.settings.sfx;
   }
 
   private applyGains(): void {
@@ -171,20 +223,62 @@ export class AudioManager {
   }
 
   /** Listen for the first key/pointer/gamepad gesture and unlock audio. */
-  attachAutoUnlock(target: EventTarget = window): void {
+  attachAutoUnlock(target?: EventTarget | null): void {
     this.detachAutoUnlock();
-    this.unlockTarget = target;
-    for (const ev of UNLOCK_EVENTS) target.addEventListener(ev, this.unlockHandler);
+    const tgt = target ?? (typeof window !== 'undefined' ? window : null);
+    if (!tgt) return;
+    this.unlockTarget = tgt;
+    for (const ev of UNLOCK_EVENTS) tgt.addEventListener(ev, this.unlockHandler);
+    this.startGamepadPoll();
   }
 
   detachAutoUnlock(): void {
+    this.stopGamepadPoll();
     if (!this.unlockTarget) return;
     for (const ev of UNLOCK_EVENTS) this.unlockTarget.removeEventListener(ev, this.unlockHandler);
     this.unlockTarget = null;
   }
 
+  private anyGamepadActivity(): boolean {
+    for (const pad of this.getGamepads()) {
+      if (!pad) continue;
+      for (const b of pad.buttons) if (b.pressed) return true;
+      for (const a of pad.axes) if (Math.abs(a) > 0.25) return true;
+    }
+    return false;
+  }
+
+  private startGamepadPoll(): void {
+    if (this.gamepadRafId !== null) return;
+    this.gamepadRafId = this.raf(this.gamepadTick);
+  }
+
+  private stopGamepadPoll(): void {
+    if (this.gamepadRafId === null) return;
+    this.cancelRaf(this.gamepadRafId);
+    this.gamepadRafId = null;
+  }
+
+  private clearActiveUtterance(u: SpeechSynthesisUtterance): void {
+    if (this.activeUtterance === u) this.activeUtterance = null;
+  }
+
+  /** Stop any Web Speech utterance owned by this manager (speech bypasses the gain graph). */
+  private cancelSpeech(): void {
+    const u = this.activeUtterance;
+    this.activeUtterance = null;
+    if (!u) return;
+    const ss = (globalThis as { speechSynthesis?: SpeechSynthesis }).speechSynthesis;
+    try {
+      ss?.cancel();
+    } catch {
+      /* ignore */
+    }
+  }
+
   /** Create/resume the AudioContext. Safe to call repeatedly; false when Web Audio is unavailable. */
   async unlock(): Promise<boolean> {
+    if (this.disposed) return false;
     if (!this.ctx) {
       const ctx = this.createContext();
       if (!ctx) return false;
@@ -198,11 +292,14 @@ export class AudioManager {
       this.synth = new GenesisSynth(ctx, { bgm: this.bgmGain, sfx: this.sfxGain }, this.seed);
       this.applyGains();
     }
+    const resumingCtx = this.ctx;
+    if (!resumingCtx) return false;
     try {
-      if (this.ctx.state === 'suspended') await this.ctx.resume();
+      if (resumingCtx.state === 'suspended') await resumingCtx.resume();
     } catch {
       return false;
     }
+    if (this.disposed || this.ctx !== resumingCtx) return false;
     this.unlocked = true;
     this.detachAutoUnlock();
     if (this.pendingBgm) {
@@ -230,21 +327,39 @@ export class AudioManager {
   /** Play an announcer callout: mp3 when available, otherwise Web Speech / formant fallback. Never throws. */
   async playVoice(id: VoiceClipId): Promise<'clip' | 'speech' | 'formant' | 'none'> {
     const clip = resolveVoiceClip(id);
-    if (!this.unlocked || !this.ctx || !this.sfxGain) return 'none';
+    const activeCtx = this.ctx;
+    const activeGain = this.sfxGain;
+    if (this.disposed || !this.unlocked || !activeCtx || !activeGain) return 'none';
     try {
-      if (await this.playClipImpl(clip.url, this.ctx, this.sfxGain)) return 'clip';
+      if (await this.playClipImpl(clip.url, activeCtx, activeGain)) return 'clip';
     } catch {
       /* fall through to fallback */
     }
+    // Re-check after the await: the manager may have been disposed or muted meanwhile.
+    if (this.disposed || !this.unlocked || this.ctx !== activeCtx || this.effectiveSfxGain() <= 0)
+      return 'none';
     const ss = (globalThis as { speechSynthesis?: SpeechSynthesis }).speechSynthesis;
     const Utt = (globalThis as { SpeechSynthesisUtterance?: typeof SpeechSynthesisUtterance })
       .SpeechSynthesisUtterance;
-    if (ss && Utt && !this.settings.muted) {
+    if (ss && Utt) {
       try {
         const u = new Utt(clip.text);
         u.pitch = 0.2;
         u.rate = 0.8;
-        u.volume = this.settings.master * this.settings.sfx;
+        u.volume = this.effectiveSfxGain();
+        this.activeUtterance = u;
+        u.onend = () => this.clearActiveUtterance(u);
+        u.onerror = (ev) => {
+          this.clearActiveUtterance(u);
+          const err = ev.error;
+          if (
+            err !== 'canceled' &&
+            err !== 'interrupted' &&
+            !this.disposed &&
+            this.effectiveSfxGain() > 0
+          )
+            this.formantVoice(clip.text);
+        };
         ss.speak(u);
         return 'speech';
       } catch {
@@ -300,7 +415,9 @@ export class AudioManager {
   }
 
   dispose(): void {
+    this.disposed = true;
     this.detachAutoUnlock();
+    this.cancelSpeech();
     this.synth?.dispose();
     this.listeners.clear();
     const c = this.ctx;

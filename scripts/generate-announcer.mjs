@@ -41,7 +41,25 @@ for (const c of clips) {
     body: JSON.stringify({ prompt: SPOKEN[c.id] ?? c.text, voice: 'am_onyx', speed: 0.9 }),
   });
   if (!res.ok) throw new Error(`fal ${res.status}: ${await res.text()}`);
-  const { audio } = await res.json();
+  const { audio, request_id } = await res.json();
+  const requestId = request_id ?? null;
+  const paidAt = new Date().toISOString();
+  // Persist the paid request IMMEDIATELY (before any download/ffmpeg step can fail) so a real
+  // fal.ai charge is never omitted from the budget ledger.
+  manifest.entries.push({
+    kind: 'audio',
+    id: c.id,
+    model: MODEL,
+    text: c.text,
+    costUsd: cost,
+    requestId,
+    estimatedCostUsd: cost,
+    status: 'paid_pending_transcode',
+    file: dest,
+    qa_verdict: 'pending',
+    at: paidAt,
+  });
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
   const wav = join(process.env.TMPDIR ?? tmpdir(), `${c.id}.wav`);
   writeFileSync(wav, Buffer.from(await (await fetch(audio.url)).arrayBuffer()));
   // Lower pitch slightly for a gravelly crypt voice, add a short crypt echo, then loudnorm.
@@ -63,16 +81,18 @@ for (const c of clips) {
     '64k',
     dest,
   ]);
-  manifest.entries.push({
-    kind: 'audio',
-    id: c.id,
-    model: MODEL,
-    text: c.text,
-    costUsd: cost,
-    file: dest,
-    at: new Date().toISOString(),
-  });
-  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
   console.log(`generated ${dest} ($${cost.toFixed(4)})`);
 }
+
+// Update qa_verdict for the just-persisted `paid_pending_transcode` entry after transcode completes.
+const byId = new Map(manifest.entries.map((e) => [e.id, e]));
+for (const c of clips) {
+  const e = byId.get(c.id);
+  if (!e || e.status !== 'paid_pending_transcode') continue;
+  e.status = 'transcoded';
+  e.qa_verdict = 'pass';
+  e.file = join(out, `${c.id}.mp3`);
+  e.transcodedAt = new Date().toISOString();
+}
+writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 console.log(`audio spend: $${spent().toFixed(4)} / $${BUDGET}`);

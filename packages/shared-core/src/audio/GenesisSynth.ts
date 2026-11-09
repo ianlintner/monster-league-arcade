@@ -205,7 +205,11 @@ export class GenesisSynth {
       if (track.loop) {
         this.bgmTimer = this.timers.setTimeout(
           () => {
-            if (this.current === id) loopOnce(start + secs);
+            if (this.current !== id) return;
+            // Skip expired loop passes (background-tab throttling) instead of catch-up bursts.
+            const nextStart =
+              start + secs < this.ctx.currentTime ? this.ctx.currentTime + 0.02 : start + secs;
+            loopOnce(nextStart);
           },
           Math.max(0, (start + secs - this.ctx.currentTime) * 1000 - 250),
         );

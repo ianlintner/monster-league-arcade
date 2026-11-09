@@ -61,6 +61,11 @@ for (const id of ids) {
     const j = JSON.parse(m[0]);
     const lufs = Number(j.input_i);
     const tp = Number(j.input_tp);
+    // Reject non-finite measurements (silent/corrupt MP3s report "-inf"/NaN) before any range check.
+    if (!Number.isFinite(lufs) || !Number.isFinite(tp)) {
+      errors.push(`${f}: non-finite loudness measurement (lufs=${j.input_i}, tp=${j.input_tp})`);
+      continue;
+    }
     // Short clips: loudnorm single-pass is approximate; require within 3 LU and true peak <= -0.9 dBTP.
     if (Math.abs(lufs + 16) > 3) errors.push(`${f}: ${lufs} LUFS not near -16`);
     if (tp > -0.9) errors.push(`${f}: true peak ${tp} dBTP too hot`);

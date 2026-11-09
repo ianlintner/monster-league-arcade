@@ -121,6 +121,44 @@ describe('GenesisSynth', () => {
     expect(midiToHz(69)).toBeCloseTo(440);
     expect(midiToHz(57)).toBeCloseTo(220);
   });
+
+  it('rebases delayed BGM loop passes instead of catch-up bursts', () => {
+    const { ctx, raw } = fakeCtx();
+    const starts: number[] = [];
+    // Capture every oscillator schedule start time.
+    raw.createOscillator = (() => {
+      const orig = raw.createOscillator;
+      return () => {
+        const o = orig();
+        const freq = o.frequency as { setValueAtTime: (v: number, t: number) => void };
+        const sva = freq.setValueAtTime.bind(freq);
+        freq.setValueAtTime = (v: number, t: number) => {
+          starts.push(t);
+          return sva(v, t);
+        };
+        return o;
+      };
+    })();
+    const timers = {
+      setTimeout: vi.fn(() => 42 as never),
+      clearTimeout: vi.fn(),
+    };
+    const s = new GenesisSynth(
+      ctx,
+      { bgm: ctx.destination, sfx: ctx.destination },
+      1,
+      timers as never,
+    );
+    s.playBgm('huddle-crypt'); // first pass starts at currentTime+0.05 (~0.05), schedules note t ~ small
+    // Tab throttled: currentTime jumps far past the ~8.78s loop boundary.
+    (ctx as unknown as { currentTime: number }).currentTime = 100;
+    const scheduled = timers.setTimeout.mock.calls.at(-1)! as unknown as [() => void, number];
+    scheduled[0](); // loop timer fires while behind real time
+    // The second pass must be scheduled at ~currentTime+0.02 (>=100), never at stale ~8.78.
+    const secondPassStart = Math.max(...starts);
+    expect(secondPassStart).toBeGreaterThanOrEqual(100);
+    s.stopBgm();
+  });
 });
 
 describe('voice manifest', () => {
@@ -234,5 +272,151 @@ describe('AudioManager', () => {
     expect(counts.osc).toBeGreaterThan(before);
     playClip.mockResolvedValueOnce(false);
     expect(await a.playVoice('forfeit')).toBe('formant');
+  });
+
+  it('attachAutoUnlock() with no window is a safe no-op (headless)', () => {
+    const a = new AudioManager({ storage: mem(), createContext: () => null });
+    expect(() => a.attachAutoUnlock()).not.toThrow();
+    expect(() => a.detachAutoUnlock()).not.toThrow();
+  });
+
+  it('unlocks on gamepad button/axis activity via polling', async () => {
+    const { ctx } = fakeCtx();
+    const pads = new Map<number, Gamepad>();
+    const rafCallbacks: FrameRequestCallback[] = [];
+    let rafId = 0;
+    const raf = vi.fn((cb: FrameRequestCallback) => {
+      rafCallbacks.push(cb);
+      return ++rafId;
+    });
+    const cancelRaf = vi.fn();
+    const a = new AudioManager({
+      storage: mem(),
+      createContext: () => ctx,
+      raf,
+      cancelRaf,
+      getGamepads: () => [null, pads.get(0) ?? null],
+    });
+    const padButtons = [
+      { pressed: false, touched: false, value: 0 },
+      { pressed: false, touched: false, value: 0 },
+    ];
+    const mk = (): Gamepad =>
+      ({
+        get buttons() {
+          return padButtons;
+        },
+        axes: [0],
+      }) as unknown as Gamepad;
+    pads.set(0, mk());
+
+    a.attachAutoUnlock(new EventTarget());
+    expect(raf).toHaveBeenCalled();
+    expect(a.isUnlocked()).toBe(false);
+
+    // Press a button, then advance the poll.
+    padButtons[1]!.pressed = true;
+    const cb = rafCallbacks[0];
+    if (!cb) throw new Error('poll not scheduled');
+    cb(16);
+    await vi.waitFor(() => expect(a.isUnlocked()).toBe(true));
+    a.dispose();
+  });
+
+  it('dispose() during pending resume() does not mark unlocked or start BGM', async () => {
+    const { ctx, counts } = fakeCtx();
+    let release: () => void = () => {};
+    (ctx as unknown as { resume: unknown }).resume = () =>
+      new Promise<void>((r) => {
+        release = r;
+      });
+    const a = new AudioManager({ storage: mem(), createContext: () => ctx });
+    a.playBgm('graveyard-network');
+    const p = a.unlock(); // parked on resume()
+    a.dispose();
+    release();
+    expect(await p).toBe(false);
+    expect(a.isUnlocked()).toBe(false);
+    expect(counts.osc).toBe(0); // no BGM started after dispose
+  });
+
+  it('setMuted(true) cancels an active Web Speech utterance', async () => {
+    const { ctx } = fakeCtx();
+    const spoken: string[] = [];
+    let cancel = false;
+    const fakeUtt = class {
+      text = '';
+      pitch = 0;
+      rate = 0;
+      volume = 0;
+      onend: (() => void) | null = null;
+      onerror: ((ev: { error: string }) => void) | null = null;
+      constructor(t: string) {
+        this.text = t;
+        spoken.push(t);
+      }
+    };
+    const ss = {
+      cancel: () => {
+        cancel = true;
+      },
+      speak: () => {},
+    };
+    (globalThis as unknown as { SpeechSynthesisUtterance: unknown }).SpeechSynthesisUtterance =
+      fakeUtt;
+    (globalThis as unknown as { speechSynthesis: unknown }).speechSynthesis = ss;
+
+    const a = new AudioManager({
+      storage: mem(),
+      createContext: () => ctx,
+      playClip: async () => false,
+    });
+    await a.unlock();
+    expect(await a.playVoice('touchdown')).toBe('speech');
+    expect(spoken.length).toBe(1);
+    a.setMuted(true);
+    expect(cancel).toBe(true);
+    a.dispose();
+    delete (globalThis as Record<string, unknown>).SpeechSynthesisUtterance;
+    delete (globalThis as Record<string, unknown>).speechSynthesis;
+  });
+
+  it('utterance.onerror (non-canceled) triggers formant fallback', async () => {
+    const { ctx, counts } = fakeCtx();
+    const holder: { onerror: ((ev: { error: string }) => void) | null } = { onerror: null };
+    const fakeUtt = class {
+      text = '';
+      pitch = 0;
+      rate = 0;
+      volume = 0;
+      onend: (() => void) | null = null;
+      onerror: ((ev: { error: string }) => void) | null = null;
+      constructor(t: string) {
+        this.text = t;
+      }
+    };
+    const ss = {
+      cancel: () => {},
+      speak: (u: { onerror: ((ev: { error: string }) => void) | null }) => {
+        holder.onerror = u.onerror;
+      },
+    };
+    (globalThis as unknown as { SpeechSynthesisUtterance: unknown }).SpeechSynthesisUtterance =
+      fakeUtt;
+    (globalThis as unknown as { speechSynthesis: unknown }).speechSynthesis = ss;
+
+    const a = new AudioManager({
+      storage: mem(),
+      createContext: () => ctx,
+      playClip: async () => false,
+    });
+    await a.unlock();
+    expect(await a.playVoice('touchdown')).toBe('speech');
+    const before = counts.osc;
+    holder.onerror?.({ error: 'synthesis-failed' });
+    expect(counts.osc).toBeGreaterThan(before); // formant synth ran
+    a.dispose();
+    delete (globalThis as Record<string, unknown>).SpeechSynthesisUtterance;
+    delete (globalThis as Record<string, unknown>).speechSynthesis;
   });
 });
