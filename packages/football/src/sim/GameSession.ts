@@ -377,6 +377,8 @@ export class GameSession {
     const offense = this.possession;
     const defense = this.defense;
     const force = opts.force ?? {};
+    // Honor an explicit per-snap override without clobbering a setRefKilledOverride() value.
+    if (force.refKilled !== undefined) this.lastForceRefKilled = force.refKilled;
     const { valid, fizzled } = this.validActive();
     const fx = computeEffects(valid);
     const has = (k: NastyKind): boolean => valid.includes(k);
@@ -422,6 +424,12 @@ export class GameSession {
 
     // ---- special teams
     if (off.kind === 'PUNT' || off.kind === 'FIELD_GOAL') {
+      // Kicks also process live-play hazard / weapon hits (and their forfeit checks)
+      // before committing the kick result.
+      for (const h of opts.hazards ?? []) {
+        this.inflictDamage(h.team, h.side, h.slot, h.amount, h.source ?? 'HAZARD');
+        if (this.winner !== null) return this.finishForfeit(res);
+      }
       this.resolveKick(off.kind, res, force);
       return this.finishPlay(res, startLos);
     }
@@ -475,9 +483,29 @@ export class GameSession {
       }
     }
 
+    // A lethal hazard / weapon hit drops the ball at the spot of death: no further
+    // yardage, touchdown scoring, or tackle damage is applied to the bench reserve
+    // that substituted into the carrier's slot. (Interception-side fumbles are
+    // resolved during ball movement, where the recovery spot is known.)
+    if (this.carrierFumbled && !raw.intercepted) {
+      res.fumble = true;
+      res.turnover = true;
+      this.flipPossession(FIELD_LENGTH - startLos);
+      return this.finishPlay(res, startLos);
+    }
+
     // Ball movement.
     const newLos = startLos + raw.gain;
-    if (raw.intercepted) {
+    if (raw.intercepted && this.carrierFumbled) {
+      // The intercepting defender died holding the Pumpkin Bomb: the ball comes
+      // loose and the offense recovers it at the interception spot instead of a
+      // clean turnover to the dead defender's team.
+      res.fumble = true;
+      res.turnover = false;
+      res.yards = raw.gain;
+      this.los = clamp(startLos + raw.gain, 1, 99);
+      this.advanceDown(res, startDown, startToGo);
+    } else if (raw.intercepted) {
       this.resolveInterception(res, startLos, raw.gain);
     } else if (newLos >= FIELD_LENGTH) {
       res.touchdown = true;
@@ -623,14 +651,11 @@ export class GameSession {
         this.inflictDamage(defense, 'DEFENSE', slot, PUMPKIN_BLAST_DAMAGE, 'EXPLOSION');
       if (this.carrierFumbled) raw.fumble = true;
     } else if (raw.kind === 'INTERCEPTION') {
-      // Intercepting defender holds the bomb; two chasing offensive players are caught in the blast.
-      this.inflictDamage(
-        defense,
-        'DEFENSE',
-        this.rng.pick(['DB1', 'DB2'] as const),
-        PUMPKIN_BLAST_DAMAGE / 2,
-        'EXPLOSION',
-      );
+      // The intercepting defender becomes the ball carrier before the blast, so a
+      // lethal hit records a fumble and is resolved as a loose-ball recovery.
+      const interceptor: DefenseSlot = this.rng.pick(['DB1', 'DB2'] as const);
+      this.carrier = { team: defense, slot: interceptor };
+      this.inflictDamage(defense, 'DEFENSE', interceptor, PUMPKIN_BLAST_DAMAGE / 2, 'EXPLOSION');
       const offSlots: OffenseSlot[] = ['QB', 'RB1', 'RB2/WR', 'WR/TE'];
       for (let i = 0; i < 2; i++)
         this.inflictDamage(
@@ -687,10 +712,12 @@ export class GameSession {
       this.receiver = defense;
       this.nextPhase = 'KICKOFF';
     } else {
-      // Missed: defense takes over from the kick spot (7 yards behind the LOS), no worse than its own 20.
+      // Missed: the receiving team takes over at the kick spot (7 yards behind the
+      // LOS), no worse than its own 20 and no better than its own 80. Compute the
+      // receiving team's spot from the unflipped kick spot so short misses floor at 20.
+      const kickSpot = this.los - 7;
       res.turnover = true;
-      this.flipPossession(clamp(FIELD_LENGTH - (this.los - 7), 1, 80));
-      if (FIELD_LENGTH - this.los < 20) this.los = 20;
+      this.flipPossession(Math.max(20, Math.min(80, FIELD_LENGTH - kickSpot)));
     }
   }
 
@@ -724,9 +751,13 @@ export class GameSession {
     const stops =
       res.kind === 'PASS_INCOMPLETE' ||
       res.touchdown ||
+      res.safety ||
       res.fieldGoalGood ||
       res.kind === 'PUNT' ||
-      res.kind === 'FIELD_GOAL';
+      res.kind === 'FIELD_GOAL' ||
+      res.kind === 'INTERCEPTION' ||
+      res.turnoverOnDowns ||
+      (res.fumble && res.turnover);
     this.clockRunning = !stops;
     this.clock = Math.max(0, this.clock - (stops ? STOPPED_PLAY_SECONDS : PLAY_SECONDS));
     this.clockExpired = this.clock <= 0;
@@ -831,7 +862,7 @@ export class GameSession {
     amount: number,
     source: DamageSource,
   ): CasualtyEvent | null {
-    if (this.winner !== null) return null;
+    if (this.winner !== null || this.phase === 'GAME_OVER') return null;
     const r = this.roster[team].damage(side, slot, amount);
     this.pendingDamage.push({
       team,

@@ -476,3 +476,133 @@ describe('casualties & carnage', () => {
     expect(g.forfeitLoser).toBe('away');
   });
 });
+
+describe('PR #4 Copilot findings', () => {
+  it('force.refKilled override works on snap', () => {
+    const g = start();
+    setup(g);
+    g.callNasty('home', 'KILL_REF');
+    const r = g.snap({
+      force: { yards: 3, fumble: false, tackleDamage: 1, refKilled: false },
+    });
+    expect(r.refKilled).toBe(false);
+    expect(g.ref.kind).toBe('NECRO_REF');
+    expect(r.penalties).toHaveLength(0);
+
+    const h = start();
+    setup(h);
+    h.callNasty('home', 'KILL_REF');
+    const r2 = h.snap({ force: { yards: 3, fumble: false, tackleDamage: 1, refKilled: true } });
+    expect(r2.refKilled).toBe(true);
+    expect(h.ref.kind).toBe('DEMON_REF');
+    expect(r2.penalties.some((p) => p.kind === 'REF_BASHING')).toBe(true);
+  });
+
+  it('hazards resolve a carnage forfeit on punt and field goal', () => {
+    for (const off of ['PUNT', 'FIELD_GOAL'] as const) {
+      const g = start();
+      g.inflictDamage('away', 'DEFENSE', 'DL1', 9999, 'HAZARD');
+      g.inflictDamage('away', 'DEFENSE', 'DL2', 9999, 'HAZARD');
+      g.inflictDamage('away', 'DEFENSE', 'DL3', 9999, 'HAZARD');
+      setup(g, off);
+      const r = g.snap({
+        hazards: [{ team: 'away', side: 'DEFENSE', slot: 'LB1', amount: 9999 }],
+      });
+      expect(r.kind).toBe('FORFEIT');
+      expect(g.phase).toBe('GAME_OVER');
+      expect(g.winner).toBe('home');
+      expect(g.forfeitLoser).toBe('away');
+    }
+  });
+
+  it('lethal hazard on carrier resolves fumble before touchdown/tackle', () => {
+    const g = start();
+    setup(g);
+    const rb = g.roster.home.player('OFFENSE', 'RB1');
+    const r = g.snap({
+      force: { yards: 90, fumble: false, tackleDamage: 9999 },
+      hazards: [{ team: 'home', side: 'OFFENSE', slot: 'RB1', amount: 9999 }],
+    });
+    expect(r.casualties).toHaveLength(1);
+    expect(r.casualties[0]).toMatchObject({ team: 'home', slot: 'RB1', fumbled: true });
+    expect(r.fumble).toBe(true);
+    expect(r.turnover).toBe(true);
+    expect(r.touchdown).toBe(false);
+    expect(g.score.home).toBe(0);
+    expect(g.possession).toBe('away');
+    // The bench substitute must not take a tackle hit in the dead carrier's slot.
+    const sub = g.roster.home.player('OFFENSE', 'RB1');
+    expect(sub.id).not.toBe(rb.id);
+    expect(r.damage.some((d) => d.source === 'TACKLE' && d.slot === 'RB1')).toBe(false);
+  });
+
+  it('Pumpkin Bomb killing the interceptor fumbles instead of a clean interception', () => {
+    const g = start();
+    setup(g, 'QUICK_SLANTS');
+    g.callNasty('home', 'PUMPKIN_BOMB_PASS');
+    // Whichever DB grabs the bomb is one hit from death.
+    g.roster.away.player('DEFENSE', 'DB1').currentHp = 1;
+    g.roster.away.player('DEFENSE', 'DB2').currentHp = 1;
+    const r = g.snap({
+      force: { sacked: false, complete: false, intercepted: true, yards: 10 },
+    });
+    expect(r.kind).toBe('INTERCEPTION');
+    const dead = r.casualties.find(
+      (c) => c.team === 'away' && (c.slot === 'DB1' || c.slot === 'DB2'),
+    );
+    expect(dead).toBeDefined();
+    expect(dead!.fumbled).toBe(true);
+    expect(r.fumble).toBe(true);
+    expect(r.turnover).toBe(false);
+    expect(g.possession).toBe('home');
+  });
+
+  it('missed FG from own 95 spots the receiving team at its 20', () => {
+    const g = start();
+    g.los = 95;
+    setup(g, 'FIELD_GOAL');
+    const r = g.snap({ force: { fieldGoalGood: false } });
+    expect(r.turnover).toBe(true);
+    expect(g.possession).toBe('away');
+    expect(g.los).toBe(20);
+  });
+
+  it('clock stops after interception, fumble, downs, and safety', () => {
+    const a = start();
+    setup(a, 'POST_CORNER');
+    a.snap({ force: { sacked: false, complete: false, intercepted: true, yards: 15 } });
+    expect(a.clockRunning).toBe(false);
+
+    const b = start();
+    setup(b);
+    b.snap({ force: { yards: 4, fumble: true, tackleDamage: 1 } });
+    expect(b.clockRunning).toBe(false);
+
+    const c = start();
+    run(c, 1);
+    run(c, 1);
+    run(c, 1);
+    const r4 = run(c, 1);
+    expect(r4.turnoverOnDowns).toBe(true);
+    expect(c.clockRunning).toBe(false);
+
+    const d = start();
+    d.los = 3;
+    const rs = run(d, -6);
+    expect(rs.safety).toBe(true);
+    expect(d.clockRunning).toBe(false);
+  });
+
+  it('damage is a no-op once the game has ended in a tie', () => {
+    const g = start();
+    g.phase = 'GAME_OVER';
+    g.winner = null;
+    g.endReason = 'TIE';
+    const before = g.roster.home.casualties;
+    const r = g.inflictDamage('home', 'OFFENSE', 'QB', 9999, 'HAZARD');
+    expect(r).toBeNull();
+    expect(g.roster.home.casualties).toBe(before);
+    expect(g.winner).toBeNull();
+    expect(g.endReason).toBe('TIE');
+  });
+});
