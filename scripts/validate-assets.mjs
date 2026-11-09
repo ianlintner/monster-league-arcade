@@ -39,9 +39,11 @@ function checkOutline(path, data, w, h, cw, ch) {
             for (let dx = -1; dx <= 1 && !edge; dx++) {
               const nx = x + dx;
               const ny = y + dy;
-              if (nx < 0 || ny < 0 || nx >= cw || ny >= ch)
-                continue; // cell border: outline cannot extend past the cell
-              else if (data[((cy + ny) * w + cx + nx) * 4 + 3] === 0) edge = true;
+              // Out-of-cell coordinates are transparent space: a non-outline opaque
+              // pixel flush against the cell border is a missing-outline violation.
+              const outside = nx < 0 || ny < 0 || nx >= cw || ny >= ch;
+              const transparent = outside || data[((cy + ny) * w + cx + nx) * 4 + 3] === 0;
+              if (transparent) edge = true;
             }
           if (edge && !isVoid(data, i)) bad++;
         }

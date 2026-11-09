@@ -228,7 +228,9 @@ function drawHoriz(b, id, { x = 6, y = 28, dirX = 1, tilt = 0, smear = 0 } = {})
   const px = (rx) => (dirX === 1 ? x + rx : 47 - x - rx);
   const R = (rx, ry, w, h, c) =>
     b.rect(dirX === 1 ? px(rx) : px(rx) - w + 1, y + ry + tilt, w, h, c);
-  if (smear) for (let i = 1; i <= smear; i++) R(-i * 3, 2, 3, 2, TOMB);
+  // 1px-wide smear bars at 1px spacing: the trailing smear must stay inside the
+  // cell so the outline pass never clips it (leftmost bar >= x_base - smear).
+  if (smear) for (let i = 1; i <= smear; i++) R(-i, 2, 1, 2, TOMB);
   R(0, 3, 12, 4, st.pants);
   R(0, 3, 12, 1, light(st.pants));
   R(12, 0, 16, 10, st.jersey);
@@ -237,15 +239,15 @@ function drawHoriz(b, id, { x = 6, y = 28, dirX = 1, tilt = 0, smear = 0 } = {})
   else R(12, 8, 16, 2, st.trim);
   R(24, -2, 5, 5, st.pad);
   R(28, 1, 10, 4, st.skin);
-  R(36, 0, 6, 6, st.skin);
-  R(30, -1, 11, 3, st.skin);
-  R(28, 0, 14, 11, st.skin); // head block
-  R(28, -1, 14, 2, light(st.skin));
+  R(34, 0, 4, 6, st.skin);
+  R(28, -1, 10, 3, st.skin);
+  R(28, 0, 10, 11, st.skin); // head block (10 wide: rightmost px stays inside the 48px cell)
+  R(28, -1, 10, 2, light(st.skin));
+  R(32, 3, 2, 2, st.eye);
   R(35, 3, 2, 2, st.eye);
-  R(39, 3, 2, 2, st.eye);
-  if (id === 'boneyard_reapers') R(28, -3, 14, 3, M.TOMBSTONE_GRAY);
-  if (id === 'salem_bayou_ghouls') R(28, -3, 14, 4, F.HEX_VIOLET);
-  if (id === 'transylvania_nightstalkers') R(28, -3, 14, 3, F.VELVET_BLACK);
+  if (id === 'boneyard_reapers') R(28, -3, 10, 3, M.TOMBSTONE_GRAY);
+  if (id === 'salem_bayou_ghouls') R(28, -3, 10, 4, F.HEX_VIOLET);
+  if (id === 'transylvania_nightstalkers') R(28, -3, 10, 3, F.VELVET_BLACK);
 }
 const TOMB = M.TOMBSTONE_GRAY;
 
@@ -309,7 +311,9 @@ function drawFrame(id, anim, f, dirIdx = 0) {
       break;
     }
     case 'dive_tackle_lunge':
-      drawHoriz(b, id, { x: [8, 4, 2][f], y: [22, 26, 32][f], tilt: 0, smear: f + 1 });
+      // Keep the body + motion smear inside the 48px cell with a >=1px margin (max
+      // head-right 45, min smear-left 2). Originally { x:[8,4,2], smear:f+1 } clipped.
+      drawHoriz(b, id, { x: [8, 6, 5][f], y: [22, 26, 32][f], tilt: 0, smear: [1, 2, 3][f] });
       break;
     case 'hit_stagger_knockdown': {
       if (f === 0) {
@@ -423,7 +427,8 @@ function crest(id) {
     salem_bayou_ghouls: [F.HEX_VIOLET, M.PUMPKIN_ORANGE],
   }[id];
   b.rect(8, 6, 48, 36, col[0]);
-  for (let i = 0; i < 24; i++) b.rect(8 + Math.floor(i * 1), 42 + i, 48 - i * 2, 1, col[0]);
+  // Shield taper stops at y <= 61 so y=62 can carry the 1px #0B0711 outline and y=63 stays transparent.
+  for (let i = 0; i < 20; i++) b.rect(8 + Math.floor(i * 1), 42 + i, 48 - i * 2, 1, col[0]);
   b.rect(8, 6, 48, 3, col[1]);
   b.rect(8, 6, 3, 36, col[1]);
   b.rect(53, 6, 3, 36, dark(col[1]));
@@ -553,8 +558,8 @@ function portrait(id, jaw) {
   }
   if (p.extra === 'witch') {
     b.rect(10, 10, 44, 4, F.HEX_VIOLET);
+    // Hat body/apex starts at y=2 so y=1 carries the 1px #0B0711 outline and y=0 stays transparent.
     b.rect(20, 2, 24, 8, F.HEX_VIOLET);
-    b.rect(26, 0, 12, 3, F.HEX_VIOLET);
     b.rect(20, 8, 24, 2, M.PUMPKIN_ORANGE);
   }
   if (p.extra === 'refcap') {

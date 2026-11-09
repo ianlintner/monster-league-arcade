@@ -56,11 +56,20 @@ export function normalizeFrame(rgba, w, h, { outline = true, opaque = false } = 
   const src = Uint8Array.from(rgba);
   if (!opaque) removeBackground(src, w, h);
   const out = new Uint8Array(w * h * 4);
-  for (let i = 0; i < w * h; i++) {
-    const a = opaque || src[i * 4 + 3] >= 128;
-    if (!a) continue;
-    const c = nearest([src[i * 4], src[i * 4 + 1], src[i * 4 + 2]]);
-    out.set([c[0], c[1], c[2], 255], i * 4);
+  // Foreground write bounds: a 1px transparent margin on every edge so the VOID
+  // outline below is never clipped at a cell boundary.
+  const x0 = outline ? 1 : 0;
+  const x1 = outline ? w - 1 : w;
+  const y0 = outline ? 1 : 0;
+  const y1 = outline ? h - 1 : h;
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const i = (y * w + x) * 4;
+      const a = opaque || src[i + 3] >= 128;
+      if (!a) continue;
+      const c = nearest([src[i], src[i + 1], src[i + 2]]);
+      out.set([c[0], c[1], c[2], 255], i);
+    }
   }
   if (opaque || !outline) return out;
   const solid = (x, y) => x >= 0 && y >= 0 && x < w && y < h && out[(y * w + x) * 4 + 3] === 255;
@@ -87,6 +96,15 @@ export async function normalizeFile(inPath, outPath, opts = {}) {
     .toBuffer({ resolveWithObject: true });
   const cw = cellW ?? info.width;
   const ch = cellH ?? info.height;
+  // Reject non-positive / non-integer cell dimensions and non-divisible image
+  // sizes before allocating or iterating, so a bad `--cell` can't hang (0x) or
+  // read across scanlines / write past the output buffer.
+  if (!Number.isInteger(cw) || cw <= 0 || !Number.isInteger(ch) || ch <= 0)
+    throw new Error(
+      `invalid cell dimensions ${cw}x${ch}: cell width/height must be positive integers`,
+    );
+  if (info.width % cw !== 0 || info.height % ch !== 0)
+    throw new Error(`image ${info.width}x${info.height} is not divisible by cell ${cw}x${ch}`);
   const out = new Uint8Array(data.length);
   for (let cy = 0; cy < info.height; cy += ch)
     for (let cx = 0; cx < info.width; cx += cw) {
@@ -123,7 +141,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
   const opts = { outline: !rest.includes('--no-outline'), opaque: rest.includes('--opaque') };
   const ci = rest.indexOf('--cell');
-  if (ci >= 0) [opts.cellW, opts.cellH] = rest[ci + 1].split('x').map(Number);
+  if (ci >= 0) {
+    const cell = rest[ci + 1];
+    if (!cell || !/^\d+x\d+$/.test(cell)) {
+      console.error(`invalid --cell value ${JSON.stringify(cell)}: expected WxH (e.g. 48x48)`);
+      process.exit(2);
+    }
+    [opts.cellW, opts.cellH] = cell.split('x').map(Number);
+  }
   await normalizeFile(inp, outp, opts);
   console.log(`normalized ${inp} -> ${outp}`);
 }
