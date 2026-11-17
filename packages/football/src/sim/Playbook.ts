@@ -809,14 +809,12 @@ export const DEFENSE_PLAYS: Record<string, DefensePlay> = Object.fromEntries(
 );
 
 export function getOffensePlay(id: string): OffensePlay {
-  const play = OFFENSE_PLAYS[id];
-  if (!play) throw new Error(`Unknown offensive play: ${id}`);
-  return play;
+  if (!Object.hasOwn(OFFENSE_PLAYS, id)) throw new Error(`Unknown offensive play: ${id}`);
+  return OFFENSE_PLAYS[id]!;
 }
 export function getDefensePlay(id: string): DefensePlay {
-  const play = DEFENSE_PLAYS[id];
-  if (!play) throw new Error(`Unknown defensive play: ${id}`);
-  return play;
+  if (!Object.hasOwn(DEFENSE_PLAYS, id)) throw new Error(`Unknown defensive play: ${id}`);
+  return DEFENSE_PLAYS[id]!;
 }
 
 // ---------------------------------------------------------------------------

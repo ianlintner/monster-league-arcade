@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { DYNAMITE_GRENADES, NastyCharges } from './DirtyTricks';
 import { GameSession } from './GameSession';
-import { AudibleController, DEFENSE_PLAYS, NASTY_SIDE, OFFENSE_PLAYS } from './Playbook';
+import {
+  AudibleController,
+  DEFENSE_PLAYS,
+  getDefensePlay,
+  getOffensePlay,
+  NASTY_SIDE,
+  OFFENSE_PLAYS,
+} from './Playbook';
 import { Referee } from './Referee';
 import { Rng } from './Rng';
 import { ROSTER_SIZE } from './Roster';
@@ -604,5 +611,81 @@ describe('PR #4 Copilot findings', () => {
     expect(g.roster.home.casualties).toBe(before);
     expect(g.winner).toBeNull();
     expect(g.endReason).toBe('TIE');
+  });
+
+  it('running game clock advances with elapsed time and expires the quarter', () => {
+    // The game clock must tick down between plays (no snap required) and end the
+    // period before another snap or timeout is allowed.
+    const g = start(9, { quarterSeconds: 150 });
+    run(g, 3);
+    g.dismissBanner();
+    // After a running play the clock is still running during the next huddle.
+    expect(g.clockRunning).toBe(true);
+    expect(g.phase).toBe('HUDDLE_PLAYCALL');
+    const before = g.clock;
+    expect(g.tickPlayClock(6)).toBeNull();
+    expect(g.clock).toBe(Math.max(0, before - 6));
+
+    // Drive the clock to zero: the quarter expires with no further snap.
+    const h = start(9, { quarterSeconds: 150 });
+    run(h, 3);
+    h.dismissBanner();
+    expect(h.clockRunning).toBe(true);
+    h.clock = 5;
+    h.tickPlayClock(6);
+    expect(h.clock).toBe(0);
+    expect(h.phase).toBe('QUARTER_END');
+    // No snap or timeout may occur after the period expired.
+    expect(() => h.snap()).toThrow();
+    expect(h.callTimeout('home')).toBe(false);
+  });
+
+  it('end-zone interception recovery awards the offense a touchdown', () => {
+    const g = start();
+    g.los = 95;
+    setup(g, 'QUICK_SLANTS');
+    g.callNasty('home', 'PUMPKIN_BOMB_PASS');
+    // Whichever DB grabs the bomb is one hit from death.
+    g.roster.away.player('DEFENSE', 'DB1').currentHp = 1;
+    g.roster.away.player('DEFENSE', 'DB2').currentHp = 1;
+    const r = g.snap({
+      force: { sacked: false, complete: false, intercepted: true, yards: 10 },
+    });
+    // The intercepting DB dies in the attacking end zone, the offense recovers: TD.
+    expect(r.fumble).toBe(true);
+    expect(r.turnover).toBe(false);
+    expect(r.touchdown).toBe(true);
+    expect(g.score.home).toBe(6);
+    expect(g.possession).toBe('home');
+  });
+
+  it('offense/defense play lookups reject inherited Object properties', () => {
+    expect(() => getOffensePlay('constructor')).toThrow();
+    expect(() => getOffensePlay('toString')).toThrow();
+    expect(() => getDefensePlay('constructor')).toThrow();
+    expect(() => getDefensePlay('toString')).toThrow();
+    expect(() => getOffensePlay('NO_SUCH_PLAY')).toThrow();
+    // selectPlays delegates to the lookups and must reject them too.
+    const g = start();
+    expect(() => g.selectPlays('constructor', 'BONE_CRUSH_BASE')).toThrow();
+    expect(() => g.selectPlays('INSIDE_GORE_RUN', 'toString')).toThrow();
+  });
+
+  it('lethal kick-carrier hit records a fumble before the kick commits', () => {
+    for (const off of ['PUNT', 'FIELD_GOAL'] as const) {
+      const g = start();
+      setup(g, off);
+      // The QB/kicker is the carrier during a kick; a single lethal hit (below the
+      // carnage limit) must fumble and abort the kick, not kick through the hit.
+      const r = g.snap({
+        hazards: [{ team: 'home', side: 'OFFENSE', slot: 'QB', amount: 9999 }],
+      });
+      expect(r.fumble).toBe(true);
+      expect(r.turnover).toBe(true);
+      expect(r.kind).toBe(off);
+      expect(r.fieldGoalGood).toBe(false);
+      expect(g.possession).toBe('away');
+      expect(g.score.home).toBe(0);
+    }
   });
 });

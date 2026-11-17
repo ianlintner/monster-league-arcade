@@ -223,6 +223,8 @@ export class GameSession {
   private pendingDamage: DamageEvent[] = [];
   private carrier: { team: TeamId; slot: Slot } | null = null;
   private carrierFumbled = false;
+  /** Game-clock seconds ticked between plays, to avoid double-charging the snap() runoff. */
+  private betweenPlayTicked = 0;
 
   constructor(config: Partial<GameConfig> = {}) {
     this.cfg = { ...DEFAULT_CONFIG, ...config };
@@ -274,6 +276,7 @@ export class GameSession {
     this.offensePlayId = null;
     this.defensePlayId = null;
     this.playClock = this.cfg.playClockSeconds;
+    this.betweenPlayTicked = 0;
     this.phase = 'HUDDLE_PLAYCALL';
   }
 
@@ -359,6 +362,18 @@ export class GameSession {
   tickPlayClock(seconds: number): Penalty | null {
     if (this.phase !== 'HUDDLE_PLAYCALL' && this.phase !== 'PRE_SNAP') return null;
     this.playClock -= seconds;
+    // A running game clock also advances with elapsed time, so a quarter can expire
+    // between plays without requiring another snap.
+    if (this.clockRunning) {
+      this.betweenPlayTicked += seconds;
+      this.clock = Math.max(0, this.clock - seconds);
+      if (this.clock <= 0) {
+        // End the period now; the phase change blocks any further snap or timeout.
+        this.resumeAfterPeriod = 'HUDDLE_PLAYCALL';
+        this.endPeriod();
+        return null;
+      }
+    }
     if (this.playClock > 0) return null;
     this.playClock = this.cfg.playClockSeconds;
     const p = makePenalty('DELAY_OF_GAME', this.possession, DELAY_OF_GAME_YARDS, 'Delay of Game');
@@ -388,7 +403,13 @@ export class GameSession {
     this.pendingCasualties = [];
     this.pendingDamage = [];
     this.carrierFumbled = false;
-    if (this.clockRunning) this.clock = Math.max(1, this.clock - RUNOFF_SECONDS);
+    if (this.clockRunning) {
+      // Automatic between-play runoff, minus anything already ticked via tickPlayClock
+      // so the same elapsed time is never charged twice.
+      const runoff = Math.max(0, RUNOFF_SECONDS - this.betweenPlayTicked);
+      this.clock = Math.max(1, this.clock - runoff);
+    }
+    this.betweenPlayTicked = 0;
 
     const startDown = this.down;
     const startToGo = this.yardsToGo;
@@ -424,11 +445,23 @@ export class GameSession {
 
     // ---- special teams
     if (off.kind === 'PUNT' || off.kind === 'FIELD_GOAL') {
+      res.kind = off.kind;
+      // The QB/kicker is the ball carrier during a kick, so a lethal hazard hit
+      // below the carnage limit records a fumble before the kick is committed.
+      this.carrier = { team: offense, slot: off.carrier };
       // Kicks also process live-play hazard / weapon hits (and their forfeit checks)
       // before committing the kick result.
       for (const h of opts.hazards ?? []) {
         this.inflictDamage(h.team, h.side, h.slot, h.amount, h.source ?? 'HAZARD');
         if (this.winner !== null) return this.finishForfeit(res);
+      }
+      if (this.carrierFumbled) {
+        // The kicker died holding the ball below the carnage limit: the kick never
+        // happens and the ball is loose at the spot of the hit.
+        res.fumble = true;
+        res.turnover = true;
+        this.flipPossession(FIELD_LENGTH - startLos);
+        return this.finishPlay(res, startLos);
       }
       this.resolveKick(off.kind, res, force);
       return this.finishPlay(res, startLos);
@@ -499,12 +532,23 @@ export class GameSession {
     if (raw.intercepted && this.carrierFumbled) {
       // The intercepting defender died holding the Pumpkin Bomb: the ball comes
       // loose and the offense recovers it at the interception spot instead of a
-      // clean turnover to the dead defender's team.
+      // clean turnover to the dead defender's team. If the spot is in the attacking
+      // end zone, the recovery is a touchdown rather than a clamp to the 99.
       res.fumble = true;
       res.turnover = false;
-      res.yards = raw.gain;
-      this.los = clamp(startLos + raw.gain, 1, 99);
-      this.advanceDown(res, startDown, startToGo);
+      const recoverySpot = startLos + raw.gain;
+      if (recoverySpot >= FIELD_LENGTH) {
+        res.touchdown = true;
+        res.yards = FIELD_LENGTH - startLos;
+        this.score[offense] += POINTS.TOUCHDOWN;
+        res.scoringTeam = offense;
+        res.points = POINTS.TOUCHDOWN;
+        this.los = FIELD_LENGTH;
+      } else {
+        res.yards = raw.gain;
+        this.los = clamp(recoverySpot, 1, 99);
+        this.advanceDown(res, startDown, startToGo);
+      }
     } else if (raw.intercepted) {
       this.resolveInterception(res, startLos, raw.gain);
     } else if (newLos >= FIELD_LENGTH) {
