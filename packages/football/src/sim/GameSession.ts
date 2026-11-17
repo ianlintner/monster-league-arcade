@@ -550,7 +550,7 @@ export class GameSession {
         this.los = FIELD_LENGTH;
       } else {
         res.yards = raw.gain;
-        this.los = clamp(recoverySpot, 1, 99);
+        this.los = Math.max(0, recoverySpot);
         // The offense recovered its opponent's fumble, so it starts a fresh
         // series at the recovery spot instead of inheriting the previous down
         // and distance (which could hand the ball back via turnover on downs).
@@ -576,7 +576,7 @@ export class GameSession {
       this.los = 0;
     } else {
       res.yards = raw.gain;
-      this.los = Math.round(newLos * 10) / 10;
+      this.los = newLos;
       // Tackle damage on the ball carrier (not on scores).
       if (
         raw.carrier &&
@@ -791,7 +791,7 @@ export class GameSession {
       this.yardsToGo = Math.min(YARDS_FOR_FIRST_DOWN, FIELD_LENGTH - this.los);
       return;
     }
-    this.yardsToGo = Math.max(1, startToGo - gained);
+    this.yardsToGo = startToGo - gained;
     this.down = startDown + 1;
     if (this.down > 4) {
       res.turnoverOnDowns = true;

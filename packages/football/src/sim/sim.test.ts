@@ -744,6 +744,54 @@ describe('PR #4 Copilot findings', () => {
     expect(g.yardsToGo).toBeCloseTo(10.5);
   });
 
+  it('laces fractional recovery spots between the 99 and goal line', () => {
+    // An interception recovered at 99.5 must stay at 99.5, not be clamped back to 99.
+    const g = start();
+    g.los = 95.5;
+    setup(g, 'QUICK_SLANTS');
+    g.callNasty('home', 'PUMPKIN_BOMB_PASS');
+    g.roster.away.player('DEFENSE', 'DB1').currentHp = 1;
+    g.roster.away.player('DEFENSE', 'DB2').currentHp = 1;
+    const r = g.snap({ force: { sacked: false, complete: false, intercepted: true, yards: 4 } });
+    expect(r.turnover).toBe(false);
+    expect(g.possession).toBe('home');
+    expect(g.los).toBeCloseTo(99.5);
+  });
+
+  it('never rounds a fractional LOS to the goal line as a safety', () => {
+    // Five half-distance penalties from the 1 leave LOS at 1/32; a zero-yard run
+    // must preserve that fractional position rather than rounding to 0 (safety).
+    const g = start();
+    g.los = 1;
+    for (let i = 0; i < 5; i++) {
+      g.playClock = 1;
+      g.tickPlayClock(1);
+    }
+    expect(g.los).toBeCloseTo(1 / 32);
+    setup(g);
+    const r = g.snap({ force: { yards: 0, fumble: false, tackleDamage: 1 } });
+    expect(r.safety).toBe(false);
+    expect(g.los).toBeCloseTo(1 / 32);
+  });
+
+  it('preserves fractional yards to go across downs', () => {
+    // Delay of Game from the own 1 leaves 10.5 yards to go; a 10-yard gain must
+    // leave a half yard (not a floored 1), so a subsequent half-yard gain converts.
+    const g = start();
+    g.los = 1;
+    g.playClock = 1;
+    g.tickPlayClock(1);
+    expect(g.yardsToGo).toBeCloseTo(10.5);
+    setup(g);
+    let r = g.snap({ force: { yards: 10, fumble: false, tackleDamage: 1 } });
+    expect(r.firstDown).toBe(false);
+    expect(g.yardsToGo).toBeCloseTo(0.5);
+    setup(g);
+    r = g.snap({ force: { yards: 0.5, fumble: false, tackleDamage: 1 } });
+    expect(r.firstDown).toBe(true);
+    expect(g.down).toBe(1);
+  });
+
   it('football exposes a Phaser-free /sim subpath export', async () => {
     // resolveJsonModule is on (tsconfig.base.json), so the package manifest is a
     // typed import rather than a runtime node:fs read.
