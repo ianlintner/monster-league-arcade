@@ -65,9 +65,20 @@ function checkPalette(path, data, w, h) {
   if (bad) fail(`${path}: ${bad} opaque pixels outside palette`);
 }
 
+/** Count opaque pixels inside a single cell. */
+function cellOpaque(data, w, cw, ch, col, row) {
+  let n = 0;
+  for (let y = 0; y < ch; y++)
+    for (let x = 0; x < cw; x++) {
+      const i = ((row * ch + y) * w + col * cw + x) * 4;
+      if (data[i + 3] !== 0) n++;
+    }
+  return n;
+}
+
 async function checkFile(
   path,
-  { w, h, cw, ch, transparent = true, outline = false, minOpaque = 0 },
+  { w, h, cw, ch, transparent = true, outline = false, minOpaque = 0, requiredCells },
 ) {
   if (!existsSync(path)) return fail(`missing ${path}`);
   const { data, info } = await sharp(path)
@@ -89,6 +100,22 @@ async function checkFile(
   if (!transparent && transparentPx > 0)
     fail(`${path} opaque tile has ${transparentPx} transparent pixels (tiling gaps)`);
   if (opaquePx < minOpaque) fail(`${path} nearly empty (${opaquePx} opaque px)`);
+  // Per-frame coverage: a sheet can clear the whole-sheet occupancy threshold
+  // while an individual required frame is empty/missing, so require every
+  // required cell to carry at least its own minimum of opaque pixels.
+  if (requiredCells) {
+    let missing = 0;
+    const minPerCell = requiredCells.min ?? 8;
+    for (const cell of requiredCells.cells) {
+      const n = cellOpaque(data, w, cw, ch, cell.col, cell.row);
+      if (n < minPerCell) {
+        missing++;
+        if (missing <= 5)
+          fail(`${path} cell (${cell.col},${cell.row}) empty (${n} px < ${minPerCell})`);
+      }
+    }
+    if (missing > 5) fail(`${path}: ${missing} required cells empty`);
+  }
   checkPalette(path, data, w, h);
   if (outline) checkOutline(path, data, w, h, cw, ch);
   const size = statSync(path).size;
@@ -96,6 +123,19 @@ async function checkFile(
 }
 
 let count = 0;
+
+// Required sprite-sheet cells: every animation frame column for every sheet
+// row (idle=4 cols, run_8dir=6, pass=4, dive=3, hit=4, death=6, celebration=4).
+// Unused padding columns (e.g. cols 3..5 on the 3-frame dive row) are excluded.
+const spriteCells = [];
+{
+  let row = 0;
+  for (const a of S.ANIMATIONS) {
+    for (let r = 0; r < a.rows; r++, row++)
+      for (let f = 0; f < a.frames; f++) spriteCells.push({ col: f, row });
+  }
+}
+
 for (const id of S.SPRITE_SHEETS) {
   await checkFile(P(`sprites/${id}.png`), {
     w: S.SHEET_COLS * S.SPRITE_CELL,
@@ -104,6 +144,7 @@ for (const id of S.SPRITE_SHEETS) {
     ch: 48,
     outline: true,
     minOpaque: 1000,
+    requiredCells: { cells: spriteCells, min: 24 },
   });
   count++;
 }
@@ -126,6 +167,10 @@ for (const id of S.PORTRAITS) {
     ch: 64,
     outline: true,
     minOpaque: 400,
+    requiredCells: {
+      cells: [0, 1].map((col) => ({ col, row: 0 })),
+      min: 100,
+    },
   });
   count++;
 }
@@ -140,6 +185,10 @@ for (const [arena, hz] of Object.entries(S.ARENAS)) {
       ch: 64,
       outline: true,
       minOpaque: 40,
+      requiredCells: {
+        cells: Array.from({ length: S.HAZARD_FRAMES }, (_, col) => ({ col, row: 0 })),
+        min: 8,
+      },
     });
   }
   count += 2 + hz.length;
