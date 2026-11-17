@@ -222,6 +222,15 @@ export class AudioManager {
     this.sfxGain.gain.setTargetAtTime(this.settings.sfx, t, 0.01);
   }
 
+  /** Initial gain values from saved settings, so a hot graph never starts at the 1.0 default. */
+  private initialGains(): { master: number; bgm: number; sfx: number } {
+    return {
+      master: this.settings.muted ? 0 : this.settings.master,
+      bgm: this.settings.bgm,
+      sfx: this.settings.sfx,
+    };
+  }
+
   /** Listen for the first key/pointer/gamepad gesture and unlock audio. */
   attachAutoUnlock(target?: EventTarget | null): void {
     this.detachAutoUnlock();
@@ -286,6 +295,12 @@ export class AudioManager {
       this.master = ctx.createGain();
       this.bgmGain = ctx.createGain();
       this.sfxGain = ctx.createGain();
+      // Seed gains from saved settings *before* wiring the graph, so an SFX fired right
+      // after unlock is not an audible blip even when the saved state is muted or zero.
+      const g = this.initialGains();
+      this.master.gain.value = g.master;
+      this.bgmGain.gain.value = g.bgm;
+      this.sfxGain.gain.value = g.sfx;
       this.bgmGain.connect(this.master);
       this.sfxGain.connect(this.master);
       this.master.connect(ctx.destination);

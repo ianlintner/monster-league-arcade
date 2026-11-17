@@ -226,6 +226,37 @@ describe('AudioManager', () => {
     expect(seen).toHaveBeenCalledWith(expect.objectContaining({ muted: true }));
   });
 
+  it('initializes gains to saved mute/zero before connecting the graph', async () => {
+    // Persisted state: muted, with sfx already at 0.
+    const storage = mem();
+    storage.setItem(
+      AUDIO_STORAGE_KEY,
+      JSON.stringify({ master: 0.8, bgm: 0.6, sfx: 0, muted: true }),
+    );
+    const { ctx, raw } = fakeCtx();
+    const created: { gain: { value: number } }[] = [];
+    const origCreateGain = raw.createGain;
+    raw.createGain = () => {
+      const n = origCreateGain();
+      created.push(n as { gain: { value: number } });
+      return n;
+    };
+    const a = new AudioManager({ storage, createContext: () => ctx });
+
+    // Gains are seeded to the saved, muted state the moment the context is built.
+    await a.unlock();
+    const master = created[0];
+    const bgm = created[1];
+    const sfx = created[2];
+    expect(master).toBeDefined();
+    expect(bgm).toBeDefined();
+    expect(sfx).toBeDefined();
+    expect(bgm!.gain.value).toBe(0.6); // bgm gain respects saved volume
+    expect(sfx!.gain.value).toBe(0); // zero sfx does not blip at 1.0
+    expect(master!.gain.value).toBe(0); // muted master is silent from the first sample
+    a.dispose();
+  });
+
   it('unlocks on first keypress/click and starts queued BGM', async () => {
     const { ctx, raw, counts } = fakeCtx();
     const a = new AudioManager({ storage: mem(), createContext: () => ctx });
