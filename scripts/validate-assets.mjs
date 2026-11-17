@@ -83,6 +83,11 @@ async function checkFile(
     else opaquePx++;
   }
   if (transparent && transparentPx === 0) fail(`${path} has no transparency`);
+  // Opaque assets (transparent: false) must have FULL coverage: a single
+  // transparent pixel is a tiling gap (e.g. an inset that discarded border
+  // pixels on an opaque 64x64 tile leaves 252 transparent border pixels).
+  if (!transparent && transparentPx > 0)
+    fail(`${path} opaque tile has ${transparentPx} transparent pixels (tiling gaps)`);
   if (opaquePx < minOpaque) fail(`${path} nearly empty (${opaquePx} opaque px)`);
   checkPalette(path, data, w, h);
   if (outline) checkOutline(path, data, w, h, cw, ch);

@@ -57,11 +57,15 @@ export function normalizeFrame(rgba, w, h, { outline = true, opaque = false } = 
   if (!opaque) removeBackground(src, w, h);
   const out = new Uint8Array(w * h * 4);
   // Foreground write bounds: a 1px transparent margin on every edge so the VOID
-  // outline below is never clipped at a cell boundary.
-  const x0 = outline ? 1 : 0;
-  const x1 = outline ? w - 1 : w;
-  const y0 = outline ? 1 : 0;
-  const y1 = outline ? h - 1 : h;
+  // outline below is never clipped at a cell boundary. Opaque assets skip
+  // outlining entirely (see the early return below), so they keep full-frame
+  // coverage — the inset would otherwise discard every border pixel and leave a
+  // 252px transparent border on a 64x64 opaque tile.
+  const inset = outline && !opaque;
+  const x0 = inset ? 1 : 0;
+  const x1 = inset ? w - 1 : w;
+  const y0 = inset ? 1 : 0;
+  const y1 = inset ? h - 1 : h;
   for (let y = y0; y < y1; y++) {
     for (let x = x0; x < x1; x++) {
       const i = (y * w + x) * 4;
