@@ -529,6 +529,10 @@ export class GameSession {
 
     // Ball movement.
     const newLos = startLos + raw.gain;
+    // Set when the offense recovers a fumble after an interception and starts a
+    // fresh series at the recovery spot; suppress the common down-advancement path
+    // so the new first down is not clobbered into a turnover on downs.
+    let recoveredSeries = false;
     if (raw.intercepted && this.carrierFumbled) {
       // The intercepting defender died holding the Pumpkin Bomb: the ball comes
       // loose and the offense recovers it at the interception spot instead of a
@@ -547,7 +551,12 @@ export class GameSession {
       } else {
         res.yards = raw.gain;
         this.los = clamp(recoverySpot, 1, 99);
-        this.advanceDown(res, startDown, startToGo);
+        // The offense recovered its opponent's fumble, so it starts a fresh
+        // series at the recovery spot instead of inheriting the previous down
+        // and distance (which could hand the ball back via turnover on downs).
+        this.down = 1;
+        this.yardsToGo = Math.min(YARDS_FOR_FIRST_DOWN, FIELD_LENGTH - this.los);
+        recoveredSeries = true;
       }
     } else if (raw.intercepted) {
       this.resolveInterception(res, startLos, raw.gain);
@@ -591,7 +600,8 @@ export class GameSession {
         }
       }
     }
-    if (!res.touchdown && !res.safety && !res.turnover) this.advanceDown(res, startDown, startToGo);
+    if (!res.touchdown && !res.safety && !res.turnover && !recoveredSeries)
+      this.advanceDown(res, startDown, startToGo);
     return this.finishPlay(res, startLos);
   }
 
@@ -878,7 +888,7 @@ export class GameSession {
   private applyPenalty(p: Penalty): number {
     const against = p.against;
     const ball = this.possession === against ? this.los : FIELD_LENGTH - this.los;
-    const yards = Math.min(p.yards, Math.floor(ball / 2));
+    const yards = Math.min(p.yards, ball / 2);
     const newBall = ball - yards;
     this.los = this.possession === against ? newBall : FIELD_LENGTH - newBall;
     if (this.possession === against) {
@@ -980,6 +990,11 @@ export class GameSession {
 
   private endPeriod(): void {
     this.clockExpired = false;
+    // A period can end while a pre-snap nasty is still pending (e.g. the running
+    // clock expires through tickPlayClock); abandon it so its single-play effect
+    // cannot survive advancePeriod() and leak onto the next half's first play.
+    this.active = [];
+    this.carrier = null;
     if (this.quarter === 4) {
       this.phase = 'GAME_OVER';
       if (this.score.home === this.score.away) {

@@ -688,4 +688,71 @@ describe('PR #4 Copilot findings', () => {
       expect(g.score.home).toBe(0);
     }
   });
+
+  it('halftime abandons a pending pre-snap nasty', () => {
+    const g = start(9);
+    // Move into Q2 and arm a single-play nasty without snapping.
+    g.quarter = 2;
+    g.phase = 'HUDDLE_PLAYCALL';
+    g.selectPlays('INSIDE_GORE_RUN', 'BONE_CRUSH_BASE');
+    g.callNasty('home', 'BAT_WING_JET_BOOST');
+    expect(g.effects.active).toContain('BAT_WING_JET_BOOST');
+    // Expire the Q2 game clock through tickPlayClock -> HALFTIME.
+    g.clockRunning = true;
+    g.clock = 1;
+    g.tickPlayClock(2);
+    expect(g.phase).toBe('HALFTIME');
+    g.advancePeriod();
+    g.kickoff({ touchback: true });
+    // The pending nasty must not leak onto Q3's first play for a different team.
+    expect(g.effects.active).not.toContain('BAT_WING_JET_BOOST');
+  });
+
+  it('recovering an interception fumble starts a new series', () => {
+    const g = start();
+    g.down = 4;
+    g.yardsToGo = 10;
+    g.los = 50;
+    setup(g, 'QUICK_SLANTS');
+    g.callNasty('home', 'PUMPKIN_BOMB_PASS');
+    // Whichever DB grabs the bomb is one hit from death.
+    g.roster.away.player('DEFENSE', 'DB1').currentHp = 1;
+    g.roster.away.player('DEFENSE', 'DB2').currentHp = 1;
+    // Interception 5 yards downfield; the interceptor dies short of the line to
+    // gain and the offense recovers: a fresh first down, not a turnover on downs.
+    const r = g.snap({
+      force: { sacked: false, complete: false, intercepted: true, yards: 5 },
+    });
+    expect(r.fumble).toBe(true);
+    expect(r.turnover).toBe(false);
+    expect(r.turnoverOnDowns).toBe(false);
+    expect(g.possession).toBe('home');
+    expect(g.down).toBe(1);
+    expect(g.los).toBe(55);
+    expect(g.yardsToGo).toBe(10);
+  });
+
+  it('half-distance penalty cap preserves fractional yards near the goal line', () => {
+    // Delay of Game from the offense's own 1-yard line must move the ball a half
+    // yard instead of being nullified by an integer floor.
+    const g = start();
+    g.los = 1;
+    // applyPenalty is private; drive it through the public play-clock path.
+    g.playClock = 1;
+    g.tickPlayClock(1);
+    expect(g.los).toBeCloseTo(0.5);
+    expect(g.yardsToGo).toBeCloseTo(10.5);
+  });
+
+  it('football exposes a Phaser-free /sim subpath export', async () => {
+    // resolveJsonModule is on (tsconfig.base.json), so the package manifest is a
+    // typed import rather than a runtime node:fs read.
+    const pkg = (await import('../../package.json')).default as {
+      exports: Record<string, string>;
+    };
+    expect(pkg.exports['./sim']).toBe('./src/sim/index.ts');
+    // The sim entry must re-export the engine without pulling in the Phaser scene.
+    const mod = await import('../sim/index');
+    expect(typeof mod.GameSession).toBe('function');
+  });
 });
