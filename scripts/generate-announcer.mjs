@@ -17,7 +17,7 @@ const manifestPath = '.asset-manifest.json';
 // Lower pitch slightly for a gravelly crypt voice, add a short crypt echo, then loudnorm.
 const AF = 'asetrate=24000*0.9,aresample=24000,aecho=0.8:0.6:60:0.25,loudnorm=I=-16:TP=-1.5:LRA=7';
 
-function ffmpegArgs(input, output) {
+export function ffmpegArgs(input, output) {
   return [
     '-y',
     '-loglevel',
@@ -32,6 +32,8 @@ function ffmpegArgs(input, output) {
     '24000',
     '-b:a',
     '64k',
+    '-f',
+    'mp3',
     output,
   ];
 }

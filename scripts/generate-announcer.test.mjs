@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { finalizeLedger, transcodeAtomic } from './generate-announcer.mjs';
+import { ffmpegArgs, finalizeLedger, transcodeAtomic } from './generate-announcer.mjs';
 
 // NOTE: importing generate-announcer.mjs runs its top-level code (reads
 // voiceManifest.ts, checks for .asset-manifest.json), not any paid fal calls —
@@ -13,6 +13,16 @@ describe('transcodeAtomic', () => {
   let dir;
   afterEach(() => {
     if (dir) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('selects an explicit mp3 muxer so ffmpeg can write a *.tmp output', () => {
+    // ffmpeg infers the muxer from the output extension; `.tmp` is ambiguous and
+    // would be rejected, so the args must force `-f mp3` right before the output.
+    const args = ffmpegArgs('/in/a.wav', '/out/a.mp3.tmp');
+    const outIdx = args.indexOf('/out/a.mp3.tmp');
+    expect(outIdx).toBeGreaterThan(0);
+    expect(args[outIdx - 2]).toBe('-f');
+    expect(args[outIdx - 1]).toBe('mp3');
   });
 
   it('renames the temp file into place only after ffmpeg exits 0', () => {
