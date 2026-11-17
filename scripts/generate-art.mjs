@@ -113,6 +113,11 @@ function drawUpright(b, id, p) {
   const bob = p.bob ?? 0;
   const v = p.view ?? { kind: 'front', s: 0 };
   const side = v.kind === 'side';
+  // Rear three-quarter views (NE/NW) turn the upper body into the run while the
+  // legs stay planted; s=0 is square-on (N). Without this the NE/N/NW rows are
+  // pixel-identical because the back view previously ignored v.s entirely.
+  const rear = v.kind === 'back' ? v.s : 0; // -1 (NW/left), 0 (N), +1 (NE/right)
+  const up = rear * 2; // upper-body horizontal offset toward the turn
   const tw = side ? 9 : 14;
   const legY = 32 + bob;
   const lleg = (side ? cx - 4 : cx - 6) + (p.lx ?? 0);
@@ -137,18 +142,25 @@ function drawUpright(b, id, p) {
       ? st.skin
       : st.skin;
   const sx = side ? 4 : 9;
-  b.line(cx - sx, shY, cx - sx + (p.al?.[0] ?? -2), shY + (p.al?.[1] ?? 8), armC, 2);
-  b.line(cx + sx - 1, shY, cx + sx - 1 + (p.ar?.[0] ?? 2), shY + (p.ar?.[1] ?? 8), armC, 2);
+  b.line(cx + up - sx, shY, cx + up - sx + (p.al?.[0] ?? -2), shY + (p.al?.[1] ?? 8), armC, 2);
+  b.line(
+    cx + up + sx - 1,
+    shY,
+    cx + up + sx - 1 + (p.ar?.[0] ?? 2),
+    shY + (p.ar?.[1] ?? 8),
+    armC,
+    2,
+  );
   // torso
-  const tx = cx - Math.floor(tw / 2);
+  const tx = cx + up - Math.floor(tw / 2);
   b.rect(tx, 20 + bob, tw, 13, st.jersey);
   b.rect(tx, 20 + bob, tw, 2, light(st.jersey)); // top-left rim highlight band
   if (st.stripes) for (let i = 0; i < tw; i += 3) b.rect(tx + i, 22 + bob, 1, 11, M.VOID_BLACK);
   else b.rect(tx, 29 + bob, tw, 2, st.trim); // jersey belt trim
   if (id === 'boneyard_reapers' && !side && v.kind === 'front')
-    for (let y = 23; y < 29; y += 2) b.rect(cx - 4, y + bob, 8, 1, M.BONE_WHITE); // ribcage
+    for (let y = 23; y < 29; y += 2) b.rect(cx + up - 4, y + bob, 8, 1, M.BONE_WHITE); // ribcage
   if (id === 'salem_bayou_ghouls')
-    b.rect(cx - 2 + (side ? 2 : 0), 31 + bob, 4, 3, M.PUMPKIN_ORANGE); // lantern belt
+    b.rect(cx + up - 2 + (side ? 2 : 0), 31 + bob, 4, 3, M.PUMPKIN_ORANGE); // lantern belt
   if (id === 'rotting_deadskins') {
     b.px(tx + 2, 27 + bob, st.skin);
     b.px(tx + 6, 31 + bob, st.skin);
@@ -157,49 +169,49 @@ function drawUpright(b, id, p) {
   const padL = id === 'rotting_deadskins' ? 8 : 6;
   const padR = id === 'rotting_deadskins' ? 5 : 6;
   if (!side) {
-    b.rect(cx - 10, 19 + bob, padL, 5, st.pad);
-    b.rect(cx - 10, 19 + bob, padL, 1, light(st.pad));
-    b.rect(cx + 10 - padR, 19 + bob, padR, 5, st.pad);
+    b.rect(cx + up - 10, 19 + bob, padL, 5, st.pad);
+    b.rect(cx + up - 10, 19 + bob, padL, 1, light(st.pad));
+    b.rect(cx + up + 10 - padR, 19 + bob, padR, 5, st.pad);
     if (id === 'boneyard_reapers') {
-      b.px(cx - 9, 17 + bob, M.BONE_WHITE);
-      b.px(cx - 9, 18 + bob, M.BONE_WHITE);
-      b.px(cx + 8, 17 + bob, M.BONE_WHITE);
-      b.px(cx + 8, 18 + bob, M.BONE_WHITE);
+      b.px(cx + up - 9, 17 + bob, M.BONE_WHITE);
+      b.px(cx + up - 9, 18 + bob, M.BONE_WHITE);
+      b.px(cx + up + 8, 17 + bob, M.BONE_WHITE);
+      b.px(cx + up + 8, 18 + bob, M.BONE_WHITE);
     }
     if (id === 'transylvania_nightstalkers') {
-      b.rect(cx - 10, 18 + bob, 3, 2, F.VAMPIRE_GOLD);
-      b.rect(cx + 7, 18 + bob, 3, 2, F.VAMPIRE_GOLD);
-      b.rect(cx - 7, 34 + bob, 14, 3, F.VELVET_BLACK);
+      b.rect(cx + up - 10, 18 + bob, 3, 2, F.VAMPIRE_GOLD);
+      b.rect(cx + up + 7, 18 + bob, 3, 2, F.VAMPIRE_GOLD);
+      b.rect(cx + up - 7, 34 + bob, 14, 3, F.VELVET_BLACK);
     }
   } else b.rect(cx - 4, 19 + bob, 8, 5, st.pad);
   // head
   const hy = 9 + bob;
-  b.rect(cx - 5, hy, 10, 10, st.skin);
-  b.rect(cx - 5, hy, 10, 1, light(st.skin));
+  b.rect(cx + up - 5, hy, 10, 10, st.skin);
+  b.rect(cx + up - 5, hy, 10, 1, light(st.skin));
   if (id === 'boneyard_reapers') {
-    b.rect(cx - 6, hy - 1, 12, 3, M.TOMBSTONE_GRAY);
-    b.px(cx - 6, hy - 3, M.BONE_WHITE);
-    b.px(cx - 6, hy - 2, M.BONE_WHITE);
-    b.px(cx + 5, hy - 3, M.BONE_WHITE);
-    b.px(cx + 5, hy - 2, M.BONE_WHITE);
+    b.rect(cx + up - 6, hy - 1, 12, 3, M.TOMBSTONE_GRAY);
+    b.px(cx + up - 6, hy - 3, M.BONE_WHITE);
+    b.px(cx + up - 6, hy - 2, M.BONE_WHITE);
+    b.px(cx + up + 5, hy - 3, M.BONE_WHITE);
+    b.px(cx + up + 5, hy - 2, M.BONE_WHITE);
   }
   if (id === 'transylvania_nightstalkers') {
-    b.rect(cx - 5, hy - 1, 10, 3, F.VELVET_BLACK);
-    b.rect(cx - 6, hy + 8, 12, 2, F.VELVET_BLACK);
+    b.rect(cx + up - 5, hy - 1, 10, 3, F.VELVET_BLACK);
+    b.rect(cx + up - 6, hy + 8, 12, 2, F.VELVET_BLACK);
   }
   if (id === 'salem_bayou_ghouls') {
-    b.rect(cx - 6, hy - 2, 12, 5, F.HEX_VIOLET);
-    b.rect(cx - 6, hy + 3, 2, 7, F.HEX_VIOLET);
-    b.rect(cx + 4, hy + 3, 2, 7, F.HEX_VIOLET);
+    b.rect(cx + up - 6, hy - 2, 12, 5, F.HEX_VIOLET);
+    b.rect(cx + up - 6, hy + 3, 2, 7, F.HEX_VIOLET);
+    b.rect(cx + up + 4, hy + 3, 2, 7, F.HEX_VIOLET);
   }
   if (id === 'demon_ref') {
-    b.px(cx - 5, hy - 2, M.BONE_WHITE);
-    b.px(cx - 6, hy - 3, M.BONE_WHITE);
-    b.px(cx + 4, hy - 2, M.BONE_WHITE);
-    b.px(cx + 5, hy - 3, M.BONE_WHITE);
+    b.px(cx + up - 5, hy - 2, M.BONE_WHITE);
+    b.px(cx + up - 6, hy - 3, M.BONE_WHITE);
+    b.px(cx + up + 4, hy - 2, M.BONE_WHITE);
+    b.px(cx + up + 5, hy - 3, M.BONE_WHITE);
   }
-  if (id === 'necro_ref') b.rect(cx - 5, hy - 2, 10, 3, M.VOID_BLACK);
-  if (id === 'rotting_deadskins') b.rect(cx - 5, hy, 10, 2, dark(st.skin));
+  if (id === 'necro_ref') b.rect(cx + up - 5, hy - 2, 10, 3, M.VOID_BLACK);
+  if (id === 'rotting_deadskins') b.rect(cx + up - 5, hy, 10, 2, dark(st.skin));
   // eyes
   const ey = hy + 4;
   if (v.kind === 'front') {
@@ -211,7 +223,7 @@ function drawUpright(b, id, p) {
   if (id === 'salem_bayou_ghouls' && v.kind === 'front')
     b.rect(cx - 4, hy + 7, 8, 1, M.TOMBSTONE_GRAY);
   if (id === 'transylvania_nightstalkers' && v.kind === 'back')
-    b.rect(cx - 6, 21 + bob, 12, 16, F.MIDNIGHT_CRIMSON);
+    b.rect(cx + up - 6, 21 + bob, 12, 16, F.MIDNIGHT_CRIMSON);
   if (p.hold)
     b.ell(
       cx + p.hold[0],
