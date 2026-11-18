@@ -14,6 +14,7 @@
     "./factions": "./src/factions/index.ts",
     "./input": "./src/input/InputManager.ts",
     "./math": "./src/math/projection25d.ts",
+    "./audio": "./src/audio/index.ts",
     "./styles.css": "./src/theme/styles.css"
   },
   "scripts": {
