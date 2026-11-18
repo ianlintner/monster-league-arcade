@@ -59,26 +59,61 @@ class Buf {
 const STYLE = {
   boneyard_reapers: {
     skin: M.BONE_WHITE,
-    home: { jersey: F.OBSIDIAN_PURPLE, trim: M.BONE_WHITE, pad: M.TOMBSTONE_GRAY, pants: F.OBSIDIAN_PURPLE },
-    away: { jersey: M.BONE_WHITE, trim: F.OBSIDIAN_PURPLE, pad: M.TOMBSTONE_GRAY, pants: M.BONE_WHITE },
+    home: {
+      jersey: F.OBSIDIAN_PURPLE,
+      trim: M.BONE_WHITE,
+      pad: M.TOMBSTONE_GRAY,
+      pants: F.OBSIDIAN_PURPLE,
+    },
+    away: {
+      jersey: M.BONE_WHITE,
+      trim: F.OBSIDIAN_PURPLE,
+      pad: M.TOMBSTONE_GRAY,
+      pants: M.BONE_WHITE,
+    },
     eye: M.SPECTRAL_CYAN,
   },
   rotting_deadskins: {
     skin: F.PUTRID_OLIVE,
-    home: { jersey: F.RUST_BLOOD, trim: M.ECTO_GREEN, pad: F.RUST_BLOOD, pants: dark(F.RUST_BLOOD) },
-    away: { jersey: M.AGED_PARCHMENT, trim: F.RUST_BLOOD, pad: F.RUST_BLOOD, pants: M.AGED_PARCHMENT },
+    home: {
+      jersey: F.RUST_BLOOD,
+      trim: M.ECTO_GREEN,
+      pad: F.RUST_BLOOD,
+      pants: dark(F.RUST_BLOOD),
+    },
+    away: {
+      jersey: M.AGED_PARCHMENT,
+      trim: F.RUST_BLOOD,
+      pad: F.RUST_BLOOD,
+      pants: M.AGED_PARCHMENT,
+    },
     eye: M.HELLFIRE_AMBER,
   },
   transylvania_nightstalkers: {
     skin: M.AGED_PARCHMENT,
-    home: { jersey: F.MIDNIGHT_CRIMSON, trim: F.VAMPIRE_GOLD, pad: F.VELVET_BLACK, pants: F.VELVET_BLACK },
-    away: { jersey: M.BONE_WHITE, trim: F.MIDNIGHT_CRIMSON, pad: F.VELVET_BLACK, pants: M.BONE_WHITE },
+    home: {
+      jersey: F.MIDNIGHT_CRIMSON,
+      trim: F.VAMPIRE_GOLD,
+      pad: F.VELVET_BLACK,
+      pants: F.VELVET_BLACK,
+    },
+    away: {
+      jersey: M.BONE_WHITE,
+      trim: F.MIDNIGHT_CRIMSON,
+      pad: F.VELVET_BLACK,
+      pants: M.BONE_WHITE,
+    },
     eye: M.VAMPIRE_CRIMSON,
   },
   salem_bayou_ghouls: {
     skin: F.SWAMP_MOSS,
     home: { jersey: F.HEX_VIOLET, trim: M.PUMPKIN_ORANGE, pad: F.HEX_VIOLET, pants: F.SWAMP_MOSS },
-    away: { jersey: M.AGED_PARCHMENT, trim: F.HEX_VIOLET, pad: F.HEX_VIOLET, pants: M.AGED_PARCHMENT },
+    away: {
+      jersey: M.AGED_PARCHMENT,
+      trim: F.HEX_VIOLET,
+      pad: F.HEX_VIOLET,
+      pants: M.AGED_PARCHMENT,
+    },
     eye: M.PUMPKIN_ORANGE,
   },
   necro_ref: {
@@ -183,7 +218,13 @@ function drawUpright(b, id, p) {
     [rleg, p.rl ?? 0],
   ]) {
     b.rect(lx, legY, 4, 9 - bob - lift, st.pants);
-    b.rect(lx - 1, legY + 8 - bob - lift, 6, 3, M.VOID_BLACK === st.pants ? M.IRON_BEZEL : dark(st.pants));
+    b.rect(
+      lx - 1,
+      legY + 8 - bob - lift,
+      6,
+      3,
+      M.VOID_BLACK === st.pants ? M.IRON_BEZEL : dark(st.pants),
+    );
   }
 
   // ---- arms (behind torso) ----
@@ -191,7 +232,14 @@ function drawUpright(b, id, p) {
   const armC = st.skin;
   const sx = side ? 4 : 9;
   b.line(cx + up - sx, shY, cx + up - sx + (p.al?.[0] ?? -2), shY + (p.al?.[1] ?? 8), armC, 2);
-  b.line(cx + up + sx - 1, shY, cx + up + sx - 1 + (p.ar?.[0] ?? 2), shY + (p.ar?.[1] ?? 8), armC, 2);
+  b.line(
+    cx + up + sx - 1,
+    shY,
+    cx + up + sx - 1 + (p.ar?.[0] ?? 2),
+    shY + (p.ar?.[1] ?? 8),
+    armC,
+    2,
+  );
 
   // ---- torso / jersey ----
   const tw = side ? 9 : 12; // torso narrower than the shoulder pads
