@@ -289,8 +289,12 @@ function drawUpright(b, id, p) {
   );
 
   // ---- torso / jersey ----
+  // Nightstalkers cape drawn FIRST (behind the jersey) so the rear-view number
+  // plate and away uniform are never covered; only its 2px edges peek out.
   const tw = side ? 9 : 12; // torso narrower than the shoulder pads
   const tx = cx + up - Math.floor(tw / 2);
+  if (id === 'transylvania_nightstalkers' && back)
+    b.rect(cx + up - 8, 20 + bob, 16, 16, F.MIDNIGHT_CRIMSON);
   b.rect(tx, 20 + bob, tw, 13, st.jersey);
   b.rect(tx, 20 + bob, tw, 2, light(st.jersey)); // top-left rim highlight band
   if (st.stripes) for (let i = 0; i < tw; i += 3) b.rect(tx + i, 22 + bob, 1, 11, M.VOID_BLACK);
@@ -353,8 +357,6 @@ function drawUpright(b, id, p) {
       b.px(cx + up - 2, hy + 9, M.BONE_WHITE);
       b.px(cx + up + 1, hy + 9, M.BONE_WHITE);
     }
-    // cape strip (back view shows it prominently)
-    if (back) b.rect(cx + up - 6, 20 + bob, 12, 16, F.MIDNIGHT_CRIMSON);
   }
   if (id === 'salem_bayou_ghouls') {
     // hood over the helmet

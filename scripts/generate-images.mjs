@@ -147,7 +147,7 @@ async function generate(s) {
  * gap, without touching the upper head or chest. The result is re-normalized
  * (palette + outline) alongside the closed frame, so it stays validator-clean.
  */
-async function jawDrop(src, out) {
+export async function jawDrop(src, out) {
   const { data, info } = await sharp(src).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const w = info.width;
   const h = info.height;
@@ -270,8 +270,18 @@ async function main() {
         const candidate = `${dest}.candidate.png`;
         if (s.kind === 'arena') normalize(cellPng, candidate, ['--opaque']);
         else if (s.kind === 'portrait') {
+          // Remove the generated background BEFORE deriving the jaw frame. The
+          // normalizer skips background removal for any cell that already carries
+          // alpha, so jawDrop (which introduces alpha in the jaw band) running on
+          // the still-opaque cell would leave the jaw-open frame with its original
+          // background — flashing against the transparent closed frame. Strip the
+          // background from the raw 64x64 cell first, then both frames share the
+          // same clean transparent backdrop and the final pass only quantises and
+          // re-outlines.
+          const cellClean = join(ROOT, `.cell-${s.id}-${attempt}-clean.png`);
+          normalize(cellPng, cellClean, []); // single 64x64 cell → bg removed + palette + outline
           const jawPng = join(ROOT, `.jaw-${s.id}-${attempt}.png`);
-          await jawDrop(cellPng, jawPng);
+          await jawDrop(cellClean, jawPng);
           const single = join(ROOT, `.single-${s.id}.png`);
           const sheet = await sharp({
             create: {
@@ -282,7 +292,7 @@ async function main() {
             },
           })
             .composite([
-              { input: cellPng, left: 0, top: 0 }, // closed mouth
+              { input: cellClean, left: 0, top: 0 }, // closed mouth
               { input: jawPng, left: 64, top: 0 }, // jaw-open second frame
             ])
             .png()

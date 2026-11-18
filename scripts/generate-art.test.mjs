@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { RUN_GAIT, DIRS, drawFrame, maskColor } from './generate-art.mjs';
-import { MASTER as M, hexToRgb } from './art-palette.mjs';
+import { MASTER as M, FACTION_COLORS as F, hexToRgb } from './art-palette.mjs';
 
 // Reapers skin/pad used for the run/idle distinctness check.
 const ID = 'boneyard_reapers';
@@ -81,11 +81,12 @@ describe('facemask paint order', () => {
   it('gives every faction a mask colour distinct from its own skin', () => {
     const skins = {
       boneyard_reapers: M.BONE_WHITE,
-      rotting_deadskins: M.PUTRID_OLIVE,
+      rotting_deadskins: F.PUTRID_OLIVE,
       transylvania_nightstalkers: M.AGED_PARCHMENT,
-      salem_bayou_ghouls: M.SWAMP_MOSS,
+      salem_bayou_ghouls: F.SWAMP_MOSS,
     };
     for (const [id, skin] of Object.entries(skins)) {
+      expect(skin).toBeDefined(); // guard: every entry resolves to a real hex
       expect(maskColor(id)).not.toBe(skin);
     }
   });
