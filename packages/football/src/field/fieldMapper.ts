@@ -128,7 +128,7 @@ export function buildLivePlayInput(
     if (a && a.route.length > 0) routes[`${offense}-${slot}`] = a.route.map(toLiveWaypoint);
   }
 
-  return { actors, carrierId, carrierRoute, routes, seed };
+  return { actors, carrierId, carrierRoute, routes, seed, los: session.los };
 }
 
 /**

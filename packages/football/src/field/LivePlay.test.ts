@@ -39,6 +39,7 @@ function makeInput(overrides: Partial<LivePlayInput> = {}): LivePlayInput {
     carrierId: 'home-RB1',
     carrierRoute: [{ x: 20, y: 0 }],
     seed: 12345,
+    los: 25,
     ...overrides,
   };
 }
@@ -112,6 +113,54 @@ describe('LivePlay resolution', () => {
 });
 
 describe('LivePlay determinism', () => {
+  it('has no stack overflow when the carrier runs past the final waypoint', () => {
+    // A short route that ends at a reachable waypoint; the carrier runs out of
+    // waypoints and should hold a downfield heading rather than recurse forever.
+    const input = makeInput({ carrierRoute: [{ x: 1, y: 0 }], los: 25 });
+    // Keep defenders far away so the carrier is never tackled.
+    input.actors.forEach((a) => {
+      if (a.side === 'DEFENSE') a.x = 200;
+    });
+    const lp = new LivePlay(input);
+    expect(() => lp.run()).not.toThrow();
+  });
+
+  it('uses the LOS-relative goal line, not a fixed 100-yard one', () => {
+    // At LOS = 90, the goal line is only 10 yards downfield; a carrier starting
+    // at x=8 and running straight should score when it crosses x=10, not x=100.
+    const input = makeInput({ carrierRoute: [{ x: 15, y: 0 }], los: 90 });
+    input.actors.forEach((a) => {
+      if (a.side === 'DEFENSE') a.x = 200;
+    });
+    const carrier = input.actors.find((a) => a.id === 'home-RB1')!;
+    carrier.x = 8;
+    const lp = new LivePlay(input);
+    lp.command({ steerX: 1, steerY: 0 });
+    const res = lp.run();
+    expect(res.outcome).toMatchObject({ kind: 'WHISTLE', reason: 'SCORE' });
+    expect(res.touchdown).toBe(true);
+  });
+
+  it('reports net yards relative to the LOS (not from the backfield start)', () => {
+    // Carrier starts 6 yards behind the LOS (typical backfield). If the play ends
+    // exactly at the LOS, net yards are 0 — not +6 from a backfield start offset.
+    const input = makeInput({ carrierRoute: [{ x: 0, y: 0 }], los: 25 });
+    input.actors.forEach((a) => {
+      if (a.side === 'DEFENSE') a.x = 200;
+    });
+    const carrier = input.actors.find((a) => a.id === 'home-RB1')!;
+    carrier.x = -6; // six yards behind the LOS
+    const lp = new LivePlay(input);
+    // No steer + no defender: route targets x=0 (the LOS). The carrier advances
+    // from -6 toward 0. Net yards must be negative (a loss from scrimmage), not
+    // a positive value displaced by the -6 backfield start.
+    for (let i = 0; i < 60; i++) lp.advance();
+    const res = lp.result();
+    expect(res.yards).toBeLessThan(0);
+    // yards is rounded to the nearest half-yard of the carrier's LOS-relative x.
+    expect(res.yards).toBeCloseTo(lp.carrier.x, 0.5);
+  });
+
   it('reproduces identical results for a fixed seed and scripted input', () => {
     const script = (lp: LivePlay): void => {
       // A fixed script: upfield 30 ticks, then cut right, then dive.

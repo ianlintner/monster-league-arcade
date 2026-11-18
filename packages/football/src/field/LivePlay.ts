@@ -50,6 +50,13 @@ export interface LivePlayInput {
   routes?: Record<string, LiveWaypoint[]>;
   /** Seed for deterministic tie-breaks / tackle resolution. */
   seed: number;
+  /**
+   * Snap-time line of scrimmage in *offense* coordinates (yards from the
+   * offense's own goal line, 0-100). LivePlay `x` is downfield from this LOS,
+   * so the attacking goal line is at `x = 100 - los` and the offense's own goal
+   * line (safety) is at `x = -los`.
+   */
+  los: number;
 }
 
 export interface LivePlayCommand {
@@ -152,7 +159,6 @@ export class LivePlay {
   private t = 0;
   private outcome: LivePlayOutcome = { kind: 'RUNNING' };
   private tackler: string | null = null;
-  private carrierStartX = 0;
   private waypointIndex = 0;
   private hitStopRemaining = 0;
   /** Zeroed steer vector to blend input with the scripted route. */
@@ -160,10 +166,20 @@ export class LivePlay {
   private steerY = 0;
   private diveHeld = false;
   private turboHeld = false;
+  /** Attacking goal line (TD) in LOS-relative x; own goal line is `-los`. */
+  private goalLineX: number;
+  private ownGoalX: number;
+  /** True when a tackle has been decided but the hit-stop freeze is still ticking. */
+  private pendingWhistle: {
+    kind: 'TACKLE' | 'OUT_OF_BOUNDS' | 'SCORE';
+    tackler: string | null;
+  } | null = null;
 
   constructor(input: LivePlayInput) {
     this.input = input;
     this.rngState = input.seed >>> 0;
+    this.goalLineX = 100 - input.los;
+    this.ownGoalX = -input.los;
     this.actors = input.actors.map((a) => ({
       id: a.id,
       team: a.team,
@@ -183,7 +199,6 @@ export class LivePlay {
     const carrier = this.actors.find((a) => a.id === input.carrierId);
     if (!carrier) throw new Error(`LivePlay: unknown carrier ${input.carrierId}`);
     this.carrier = carrier;
-    this.carrierStartX = carrier.x;
   }
 
   /** Deterministic mulberry32-consistent RNG for tie-breaks. */
@@ -216,6 +231,13 @@ export class LivePlay {
     if (this.hitStopRemaining > 0) {
       this.hitStopRemaining -= LIVE_TUNING.dt;
       this.t += LIVE_TUNING.dt;
+      // The whistle was decided at contact but deferred for the freeze so the
+      // renderer can show the impact; commit it once the freeze elapses.
+      if (this.hitStopRemaining <= 0 && this.pendingWhistle) {
+        const p = this.pendingWhistle;
+        this.outcome = { kind: 'WHISTLE', reason: p.kind };
+        this.tackler = p.tackler;
+      }
       return this.outcome;
     }
 
@@ -262,7 +284,11 @@ export class LivePlay {
     const canTurbo = turbo && c.stamina > 0;
     const speedMult = canTurbo ? LIVE_TUNING.turboSpeedMult : 1;
     if (canTurbo) c.stamina = clamp(c.stamina - LIVE_TUNING.dt / LIVE_TUNING.turboMaxSeconds, 0, 1);
-    else c.stamina = clamp(c.stamina + LIVE_TUNING.staminaRegenPerSecond * LIVE_TUNING.dt, 0, 1);
+    else if (!turbo)
+      // Regen only when the player is not holding turbo at all; holding it with an
+      // empty tank must not refill mid-grip (that would let a drained sprint loop
+      // forever).
+      c.stamina = clamp(c.stamina + LIVE_TUNING.staminaRegenPerSecond * LIVE_TUNING.dt, 0, 1);
 
     const desiredVx = tx * this.input.actors.find((a) => a.id === c.id)!.topSpeed * speedMult;
     const desiredVy = ty * this.input.actors.find((a) => a.id === c.id)!.topSpeed * speedMult;
@@ -296,14 +322,19 @@ export class LivePlay {
       return { x: this.steerX / m, y: this.steerY / m };
     }
     const route = this.input.carrierRoute;
-    const wp = route[Math.min(this.waypointIndex, route.length - 1)];
-    if (!wp) return { x: 1, y: 0 };
+    if (route.length === 0) return { x: 1, y: 0 };
+    if (this.waypointIndex >= route.length) {
+      // Past the final waypoint with no further target: hold a downfield heading
+      // instead of re-entering the last waypoint and recursing forever.
+      return { x: 1, y: 0 };
+    }
+    const wp = route[this.waypointIndex]!;
     const dx = wp.x - this.carrier.x;
     const dy = wp.y - this.carrier.y;
     const m = Math.hypot(dx, dy);
     if (m < 0.5) {
-      // Reached the waypoint; advance to the next.
-      this.waypointIndex = Math.min(this.waypointIndex + 1, route.length - 1);
+      // Reached the waypoint; advance to the next (or run out the route).
+      this.waypointIndex += 1;
       return this.carrierHeading();
     }
     return { x: dx / m, y: dy / m };
@@ -343,14 +374,15 @@ export class LivePlay {
       this.end('OUT_OF_BOUNDS', null);
       return;
     }
-    // Goal line reached (downfield yard-space; the LOS is x=0, goal is +100 yards).
-    if (c.x >= 100) {
+    // Goal line reached: LOS-relative, so the attacking goal is `100 - los` from
+    // the LOS (not a fixed 100) and the offense's own goal is `-los` behind it.
+    if (c.x >= this.goalLineX) {
       this.end('SCORE', null);
       return;
     }
-    // Safety-ish: driven far back (only matters for negative yards near own goal).
-    if (c.x <= -100) {
-      this.end('TACKLE', null);
+    // Driven back across the offense's own goal line: a safety.
+    if (c.x <= this.ownGoalX) {
+      this.end('SCORE', null);
       return;
     }
 
@@ -370,14 +402,22 @@ export class LivePlay {
       // Tackler's tackle rating vs carrier agility: favour a break on the fringe.
       const ranged = this.next();
       if (ranged < 0.9 || nearestDist < radius * 0.6) {
+        // Defer the whistle by one hit-stop so the impact freeze actually renders;
+        // `end('TACKLE', …)` records the pending whistle and arms the freeze.
         this.end('TACKLE', nearest.id);
-        this.hitStopRemaining = LIVE_TUNING.hitStopSeconds;
       }
     }
   }
 
   private end(reason: 'TACKLE' | 'OUT_OF_BOUNDS' | 'SCORE', tacklerId: string | null): void {
-    if (this.outcome.kind !== 'RUNNING') return;
+    if (this.outcome.kind !== 'RUNNING' || this.pendingWhistle) return;
+    if (reason === 'TACKLE') {
+      // A tackle freezes the field for one hit-stop beat before the whistle; bounds
+      // and scores whistle immediately (no physical contact to freeze on).
+      this.pendingWhistle = { kind: reason, tackler: tacklerId };
+      this.hitStopRemaining = LIVE_TUNING.hitStopSeconds;
+      return;
+    }
     this.outcome = { kind: 'WHISTLE', reason };
     this.tackler = tacklerId;
   }
@@ -403,7 +443,9 @@ export class LivePlay {
 
   result(): LivePlayResult {
     const c = this.carrier;
-    const yards = c.x - this.carrierStartX;
+    // `c.x` is already downfield-yards from the LOS (x=0 at snap), so it *is* net
+    // yards: no need to subtract the carrier's backfield starting position.
+    const yards = c.x;
     return {
       outcome: this.outcome,
       yards: Math.round(yards * 2) / 2,

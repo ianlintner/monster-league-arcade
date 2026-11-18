@@ -56,6 +56,7 @@ interface RenderActor {
   py: number;
   depth: number;
   isCarrier: boolean;
+  isHighlighted: boolean;
 }
 
 export class MatchScene extends Phaser.Scene {
@@ -71,6 +72,10 @@ export class MatchScene extends Phaser.Scene {
   private highlightDefender = -1;
   private inputPollTimer = 0;
   private steer = { x: 0, y: 0 };
+  /** Accumulated real time (s) not yet consumed by fixed 60 Hz sim ticks. */
+  private simAccumulator = 0;
+  /** Snap-time LOS, captured when the live play is built, for stable rendering. */
+  private snapLos = 0;
 
   private fieldGfx!: Phaser.GameObjects.Graphics;
   private indicatorGfx!: Phaser.GameObjects.Graphics;
@@ -132,7 +137,7 @@ export class MatchScene extends Phaser.Scene {
         this.updatePreSnap();
         break;
       case 'LIVE':
-        this.updateLive();
+        this.updateLive(dt);
         break;
       case 'BANNER':
         this.updateBanner(dt);
@@ -146,7 +151,13 @@ export class MatchScene extends Phaser.Scene {
 
   private sampleInput(dt: number): void {
     this.inputPollTimer -= dt;
-    if (this.inputPollTimer > 0) return;
+    if (this.inputPollTimer > 0) {
+      // A skipped poll must not leak the previous frame's edge presses into the
+      // next mode handler, or one press can re-fire (e.g. C both picks *and*
+      // snaps when a poll is skipped between them). Clear now.
+      this.pressed.clear();
+      return;
+    }
     this.inputPollTimer = 1 / 60;
 
     const kb = this.input.keyboard!;
@@ -193,14 +204,13 @@ export class MatchScene extends Phaser.Scene {
   private confirmPlay(index: number): void {
     this.selectedPlayIndex = index;
     this.session.selectPlays(RUN_PLAYS[index]!.id, DEFAULT_DEFENSE);
+    // Build the live-play state now so the formation renders during pre-snap;
+    // it is only *advanced* once the ball is snapped.
+    this.buildLivePlay();
     this.mode = 'PRE_SNAP';
   }
 
-  private updatePreSnap(): void {
-    if (this.wasPressed(KeyC)) this.beginLivePlay();
-  }
-
-  private beginLivePlay(): void {
+  private buildLivePlay(): void {
     const input = buildLivePlayInput(
       this.session,
       RUN_PLAYS[this.selectedPlayIndex]!.id,
@@ -208,14 +218,21 @@ export class MatchScene extends Phaser.Scene {
       0x9e3779b9,
     );
     this.live = new LivePlay(input);
+    this.snapLos = this.session.los;
     this.liveResult = null;
     this.highlightDefender = -1;
-    this.mode = 'LIVE';
+    this.simAccumulator = 0;
+  }
+
+  private updatePreSnap(): void {
+    if (this.wasPressed(KeyC)) {
+      this.mode = 'LIVE';
+    }
   }
 
   // ------------------------------------------------------------- live loop
 
-  private updateLive(): void {
+  private updateLive(dt: number): void {
     const live = this.live;
     if (!live) return;
 
@@ -224,8 +241,8 @@ export class MatchScene extends Phaser.Scene {
       this.highlightDefender = (this.highlightDefender + 1) % 7;
     }
 
-    // Feed the carrier command, then advance a full 60 Hz frame. Turbo (C) and
-    // dive (A) are edge-detected so they re-fire on each press; steering is held.
+    // Feed the carrier command, then advance one 60 Hz step per 1/60 s of real
+    // elapsed time (catch-up capped at 4 steps so a stalled frame doesn't burst).
     const turboHeld = this.input.keyboard!.addKey(KeyC).isDown;
     live.command({
       steerX: this.steer.x,
@@ -234,12 +251,17 @@ export class MatchScene extends Phaser.Scene {
       turbo: turboHeld,
     });
 
-    // Advance up to a few sim steps to stay near real time under janky RAF.
+    this.simAccumulator += dt;
+    const tick = 1 / 60;
     const maxSteps = 4;
-    for (let i = 0; i < maxSteps; i++) {
+    let steps = 0;
+    while (this.simAccumulator >= tick && steps < maxSteps) {
+      this.simAccumulator -= tick;
       const outcome = live.advance();
+      steps += 1;
       if (outcome.kind === 'WHISTLE') break;
     }
+    if (steps === maxSteps) this.simAccumulator = 0; // drop excess, stay near real time
 
     if (live.snapshot().outcome.kind === 'WHISTLE') {
       this.liveResult = live.result();
@@ -261,7 +283,15 @@ export class MatchScene extends Phaser.Scene {
   private updateBanner(dt: number): void {
     this.bannerTimer -= dt;
     if (this.bannerTimer > 0) return;
-    this.session.dismissBanner();
+
+    const phase = this.session.phase;
+    if (phase === 'PLAY_OVER_BANNER') this.session.dismissBanner();
+    else if (phase === 'QUARTER_END' || phase === 'HALFTIME') this.session.advancePeriod();
+    else if (phase === 'GAME_OVER') {
+      // Noninteractive: stay on the final banner; there is no next play to pick.
+      return;
+    }
+
     // Collapse extra-point / kickoff wind-downs to the next huddle for this card.
     let guard = 0;
     while (
@@ -272,8 +302,17 @@ export class MatchScene extends Phaser.Scene {
       if (this.session.phase === 'EXTRA_POINT') this.session.extraPoint('KICK');
       else if (this.session.phase === 'KICKOFF') this.session.kickoff({ touchback: true });
       else if (this.session.phase === 'PLAY_OVER_BANNER') this.session.dismissBanner();
+      else if (this.session.phase === 'QUARTER_END' || this.session.phase === 'HALFTIME')
+        this.session.advancePeriod();
       else break;
     }
+
+    // Remain on the final banner for GAME_OVER; otherwise return to play-calling.
+    if (this.session.phase === 'GAME_OVER') {
+      this.liveResult = null;
+      return;
+    }
+
     this.live = null;
     this.liveResult = null;
     this.mode = 'PICK';
@@ -401,7 +440,10 @@ export class MatchScene extends Phaser.Scene {
     this.actorsLayer.removeAll(true);
     if (!this.live) return;
 
-    const los = this.session.los;
+    const los = this.snapLos;
+    // Resolve the highlighted defender's id once (B cycles index 0..6).
+    const defenders = this.live.actors.filter((x) => x.side === 'DEFENSE');
+    const hlId = this.highlightDefender >= 0 ? defenders[this.highlightDefender]?.id : undefined;
     const actors: RenderActor[] = this.live.actors.map((state) => {
       const f = projectActor(state.x, state.y, los);
       const s = projectToScreen(f.x, f.y);
@@ -411,6 +453,7 @@ export class MatchScene extends Phaser.Scene {
         py: s.y,
         depth: s.y,
         isCarrier: state.id === this.live!.carrier.id,
+        isHighlighted: hlId !== undefined && state.id === hlId,
       };
     });
 
@@ -426,12 +469,11 @@ export class MatchScene extends Phaser.Scene {
     const w = 12;
     const h = 18;
     const color = s.team === 'home' ? toPhaserColor('BONE_WHITE') : toPhaserColor('ECTO_GREEN');
-    const isHl = this.highlightDefender >= 0 && s.side === 'DEFENSE';
 
     const sp = this.add.rectangle(a.px, a.py - h / 2, w, h, color, 1);
     sp.setDepth(a.depth);
     if (a.isCarrier) sp.setFillStyle(toPhaserColor('HELLFIRE_AMBER'), 1);
-    if (isHl) sp.setStrokeStyle(1, toPhaserColor('SPECTRAL_CYAN'), 1);
+    if (a.isHighlighted) sp.setStrokeStyle(1, toPhaserColor('SPECTRAL_CYAN'), 1);
     this.actorsLayer.add(sp);
 
     const shadow = this.add.ellipse(a.px, a.py, w * 1.2, 5, 0x000000, 0.35);
@@ -550,7 +592,7 @@ export class MatchScene extends Phaser.Scene {
         this.confirmPlay(this.selectedPlayIndex);
       },
       snap: () => {
-        if (this.mode === 'PRE_SNAP') this.beginLivePlay();
+        if (this.mode === 'PRE_SNAP') this.mode = 'LIVE';
       },
     };
   }
