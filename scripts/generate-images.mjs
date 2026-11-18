@@ -275,11 +275,11 @@ async function main() {
           // alpha, so jawDrop (which introduces alpha in the jaw band) running on
           // the still-opaque cell would leave the jaw-open frame with its original
           // background — flashing against the transparent closed frame. Strip the
-          // background from the raw 64x64 cell first, then both frames share the
-          // same clean transparent backdrop and the final pass only quantises and
-          // re-outlines.
+          // background from the raw 64x64 cell first (without outlining: the
+          // assembled two-frame sheet is outlined exactly once below), then both
+          // frames share the same clean transparent backdrop.
           const cellClean = join(ROOT, `.cell-${s.id}-${attempt}-clean.png`);
-          normalize(cellPng, cellClean, []); // single 64x64 cell → bg removed + palette + outline
+          normalize(cellPng, cellClean, ['--no-outline']); // single 64x64 cell → bg removed + palette, no outline
           const jawPng = join(ROOT, `.jaw-${s.id}-${attempt}.png`);
           await jawDrop(cellClean, jawPng);
           const single = join(ROOT, `.single-${s.id}.png`);
