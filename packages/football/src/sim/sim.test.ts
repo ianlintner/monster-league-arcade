@@ -150,7 +150,9 @@ describe('downs, clock & scoring', () => {
   it('out-of-bounds run stops the clock and never fumbles', () => {
     const g = start();
     setup(g, 'INSIDE_GORE_RUN');
-    const r = g.snap({ force: { yards: 5, fumble: false, tackleDamage: 1, outOfBounds: true } });
+    // Force a fumble: without the out-of-bounds guard this would resolve a
+    // FUMBLE LOST and flip possession. The guard must suppress it.
+    const r = g.snap({ force: { yards: 5, fumble: true, tackleDamage: 1, outOfBounds: true } });
     expect(r.outOfBounds).toBe(true);
     expect(g.clockRunning).toBe(false);
     expect(r.fumble).toBe(false);
