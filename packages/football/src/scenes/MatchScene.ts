@@ -272,8 +272,9 @@ export class MatchScene extends Phaser.Scene {
   /** Commit the live-play result into the session and show the play-over banner. */
   private commitOutcome(): void {
     const r = this.liveResult!;
-    // The live carrier's final downfield position IS the gain from scrimmage.
-    const yards = Math.round(r.finalX);
+    // The live carrier's final downfield position IS the gain from scrimmage;
+    // keep it fractional so GameSession classifies TDs/safeties exactly.
+    const yards = r.finalX;
     const res = this.session.snap({ force: { yards } });
     this.bannerText = res.banner;
     this.bannerTimer = 2.2;
@@ -380,8 +381,9 @@ export class MatchScene extends Phaser.Scene {
   }
 
   private drawYardNumber(g: DrawSurface, x: number): void {
-    // Distance from the 50 (field coord 60) mirrored to both sides of the field.
-    const label = String(Math.abs(x - 60));
+    // Yardage from the nearer goal line (field x=10 and x=110), so x=20 is the
+    // 10-yard line (not 40) and midfield x=60 is 50 (not 0).
+    const label = String(Math.min(x - 10, 110 - x));
     const top = projectToScreen(x, 14);
     const bot = projectToScreen(x, 39);
     this.drawBlockText(g, label, top.x, top.y, top.scale);
@@ -404,13 +406,20 @@ export class MatchScene extends Phaser.Scene {
     };
     const cw = Math.max(3, 4 * s);
     const ch = Math.max(5, 6 * s);
-    const bits = glyphs[text[0] ?? '0'] ?? 0;
-    const x0 = cx - cw / 2;
+    const gap = Math.max(1, s);
+    // Render every digit, offsetting each glyph to the right, so "10"/"40" show
+    // both characters instead of only the leading one.
+    const total = text.length * (cw * 3) + (text.length - 1) * gap;
+    const xBase = cx - total / 2;
     const y0 = cy - ch / 2;
     g.fillStyle(toPhaserColor('BONE_WHITE'), 0.85);
-    for (let row = 0; row < 5; row++) {
-      for (let col = 0; col < 3; col++) {
-        if (bits & (1 << (row * 3 + col))) g.fillRect(x0 + col * cw, y0 + row * ch, cw, ch);
+    for (let i = 0; i < text.length; i++) {
+      const bits = glyphs[text[i] ?? '0'] ?? 0;
+      const x0 = xBase + i * (cw * 3 + gap);
+      for (let row = 0; row < 5; row++) {
+        for (let col = 0; col < 3; col++) {
+          if (bits & (1 << (row * 3 + col))) g.fillRect(x0 + col * cw, y0 + row * ch, cw, ch);
+        }
       }
     }
   }
@@ -504,9 +513,13 @@ export class MatchScene extends Phaser.Scene {
     }
 
     // Stamina arc: partial circle from 12 o'clock clockwise proportional to 0..1.
+    // `Graphics.arc` only appends to the path; start a fresh path and stroke it
+    // explicitly so the arc actually renders (otherwise it is cleared next frame).
     const frac = Math.max(0, Math.min(1, state.stamina));
     g.lineStyle(2, toPhaserColor('ECTO_GREEN'), 0.85);
+    g.beginPath();
     g.arc(px, py - 8, r + 3, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2, false);
+    g.strokePath();
   }
 
   private drawStar(g: DrawSurface, cx: number, cy: number): void {
@@ -546,13 +559,24 @@ export class MatchScene extends Phaser.Scene {
   }
 
   private updateDom(line: string): void {
+    // Update the scorebug's value cells in place rather than overwriting the
+    // component's `textContent`, which would destroy its team names/swatches.
     const scorebug = document.querySelector('[data-testid="scorebug"]');
     if (scorebug) {
-      scorebug.textContent =
-        `${this.session.score.home}  ·  Q${this.session.quarter}  ` +
-        `${String(Math.floor(this.session.clock / 60)).padStart(2, '0')}:${String(
+      const scores = scorebug.querySelectorAll('.gsn-scorebug__score');
+      if (scores.length >= 2 && scores[0] && scores[1]) {
+        scores[0].textContent = String(this.session.score.home);
+        scores[1].textContent = String(this.session.score.away);
+      }
+      const meta = scorebug.querySelector('.gsn-scorebug__meta');
+      if (meta) meta.textContent = `Q${this.session.quarter}`;
+      const center = scorebug.querySelector('.gsn-scorebug__center');
+      const clock = center?.children[1];
+      if (clock) {
+        clock.textContent = `${String(Math.floor(this.session.clock / 60)).padStart(2, '0')}:${String(
           Math.floor(this.session.clock % 60),
-        ).padStart(2, '0')}  ·  ${this.session.score.away}`;
+        ).padStart(2, '0')}`;
+      }
     }
     const prompt = document.querySelector('.gsn-control-bar__prompt');
     if (prompt) prompt.textContent = line;

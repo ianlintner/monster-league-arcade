@@ -166,9 +166,10 @@ export class LivePlay {
   private steerY = 0;
   private diveHeld = false;
   private turboHeld = false;
-  /** Attacking goal line (TD) in LOS-relative x; own goal line is `-los`. */
+  /** True while the last tick's velocity was roughly aligned with the desired heading. */
+  private wasAligned = true;
+  /** Attacking goal line (TD) in LOS-relative x. */
   private goalLineX: number;
-  private ownGoalX: number;
   /** True when a tackle has been decided but the hit-stop freeze is still ticking. */
   private pendingWhistle: {
     kind: 'TACKLE' | 'OUT_OF_BOUNDS' | 'SCORE';
@@ -179,7 +180,6 @@ export class LivePlay {
     this.input = input;
     this.rngState = input.seed >>> 0;
     this.goalLineX = 100 - input.los;
-    this.ownGoalX = -input.los;
     this.actors = input.actors.map((a) => ({
       id: a.id,
       team: a.team,
@@ -214,13 +214,19 @@ export class LivePlay {
   command(cmd: LivePlayCommand): void {
     this.steerX = clamp(cmd.steerX, -1, 1);
     this.steerY = clamp(cmd.steerY, -1, 1);
-    this.diveHeld = cmd.dive ?? false;
+    // Dive is latched: a press on a frame that runs zero sim ticks must not be
+    // lost to a later `dive: false` before the next `advance()` consumes it.
+    if (cmd.dive) this.diveHeld = true;
     this.turboHeld = cmd.turbo ?? false;
   }
 
   /** Advance one fixed 60 Hz tick with the last-commanded control state. */
   advance(): LivePlayOutcome {
-    return this.step(this.diveHeld, this.turboHeld);
+    const out = this.step(this.diveHeld, this.turboHeld);
+    // A dive request is consumed the moment a tick runs (even if it was ignored
+    // because the carrier was already diving); only a fresh press re-arms it.
+    this.diveHeld = false;
+    return out;
   }
 
   /** Advance one fixed 60 Hz tick, applying the current command. Returns true if the play ended. */
@@ -298,18 +304,20 @@ export class LivePlay {
     c.vx += (desiredVx - c.vx) * k;
     c.vy += (desiredVy - c.vy) * k;
 
-    // Hard cut: a large heading change bleeds ~30% speed.
+    // Hard cut: a large heading change bleeds ~30% speed — but only once per turn,
+    // not on every tick while the velocity catches up to the new heading.
     const headingMag = Math.hypot(c.vx, c.vy);
-    if (headingMag > 1e-3) {
-      const dot =
-        (c.vx * desiredVx + c.vy * desiredVy) /
-        (headingMag * (Math.hypot(desiredVx, desiredVy) || 1));
-      if (dot < 0.5) {
-        const scale = LIVE_TUNING.cutSpeedRetention;
-        c.vx *= scale;
-        c.vy *= scale;
-      }
+    const aligned =
+      headingMag <= 1e-3 ||
+      (c.vx * desiredVx + c.vy * desiredVy) /
+        (headingMag * (Math.hypot(desiredVx, desiredVy) || 1)) >=
+        0.5;
+    if (!aligned && this.wasAligned) {
+      const scale = LIVE_TUNING.cutSpeedRetention;
+      c.vx *= scale;
+      c.vy *= scale;
     }
+    this.wasAligned = aligned;
 
     c.x += c.vx * LIVE_TUNING.dt;
     c.y += c.vy * LIVE_TUNING.dt;
@@ -375,16 +383,15 @@ export class LivePlay {
       return;
     }
     // Goal line reached: LOS-relative, so the attacking goal is `100 - los` from
-    // the LOS (not a fixed 100) and the offense's own goal is `-los` behind it.
+    // the LOS (not a fixed 100). Crossing it scores a touchdown.
     if (c.x >= this.goalLineX) {
       this.end('SCORE', null);
       return;
     }
-    // Driven back across the offense's own goal line: a safety.
-    if (c.x <= this.ownGoalX) {
-      this.end('SCORE', null);
-      return;
-    }
+    // The offense's own end line is NOT a whistle: the ball stays live until a
+    // tackle or bounds exit. Whether the final spot becomes a safety is decided
+    // by `GameSession` from the committed fractional yardage, so reserving SCORE
+    // here keeps `result().touchdown` from also reporting safeties as TDs.
 
     // Tackle: nearest defender within tackle radius engages.
     const radius: number = LIVE_TUNING.tackleRadius;
