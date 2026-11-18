@@ -45,17 +45,16 @@ function makeInput(overrides: Partial<LivePlayInput> = {}): LivePlayInput {
 }
 
 describe('LivePlay movement', () => {
-  it('reaches near top speed in ~0.25 s (acceleration curve)', () => {
+  it('reaches near top speed within ~0.25 s (acceleration curve)', () => {
     const lp = new LivePlay(makeInput());
     // Give the carrier a clear downfield route and no defenders near.
     lp.command({ steerX: 1, steerY: 0 });
-    // After ~0.25 s (15 ticks), speed should be ~63% of top speed (1 - 1/e).
+    // After ~0.25 s (15 ticks), speed should be ~95% of top speed.
     for (let i = 0; i < 15; i++) lp.advance();
     const c = lp.carrier;
     const speed = Math.hypot(c.vx, c.vy);
     const ratio = speed / 7;
-    expect(ratio).toBeGreaterThan(0.5);
-    expect(ratio).toBeLessThan(0.75);
+    expect(ratio).toBeGreaterThan(0.9);
   });
 
   it('hard cut bleeds ~30% speed', () => {
@@ -82,11 +81,17 @@ describe('LivePlay movement', () => {
 
 describe('LivePlay resolution', () => {
   it('tackles when a defender reaches the carrier', () => {
-    // Place a defender right on top of the carrier's route.
+    // Place a defender right on top of the carrier's route, clear of blockers.
     const input = makeInput();
     const defender = input.actors.find((a) => a.id === 'away-DL1')!;
     defender.x = 0.5;
-    defender.y = 0;
+    defender.y = -2; // on the carrier (home-RB1 at y=-2), away from blocking OL
+    // Move offensive blockers out of reach so they don't engage this defender.
+    input.actors
+      .filter((a) => a.side === 'OFFENSE' && a.id !== 'home-RB1')
+      .forEach((a) => {
+        a.x = 200;
+      });
     const lp = new LivePlay(input);
     const res = lp.run();
     expect(res.outcome.kind).toBe('WHISTLE');
@@ -142,8 +147,8 @@ describe('LivePlay determinism', () => {
   });
 
   it('reports net yards relative to the LOS (not from the backfield start)', () => {
-    // Carrier starts 6 yards behind the LOS (typical backfield). If the play ends
-    // exactly at the LOS, net yards are 0 — not +6 from a backfield start offset.
+    // Carrier starts 6 yards behind the LOS (typical backfield). Net yards must be
+    // measured from the LOS (x=0 at snap), not displaced by the backfield start.
     const input = makeInput({ carrierRoute: [{ x: 0, y: 0 }], los: 25 });
     input.actors.forEach((a) => {
       if (a.side === 'DEFENSE') a.x = 200;
@@ -151,14 +156,15 @@ describe('LivePlay determinism', () => {
     const carrier = input.actors.find((a) => a.id === 'home-RB1')!;
     carrier.x = -6; // six yards behind the LOS
     const lp = new LivePlay(input);
-    // No steer + no defender: route targets x=0 (the LOS). The carrier advances
-    // from -6 toward 0. Net yards must be negative (a loss from scrimmage), not
-    // a positive value displaced by the -6 backfield start.
-    for (let i = 0; i < 60; i++) lp.advance();
+    // Advance only a few ticks: the carrier moves from -6 toward the LOS and is
+    // still short of it, so net yards are negative and track its LOS-relative x.
+    for (let i = 0; i < 20; i++) lp.advance();
     const res = lp.result();
     expect(res.yards).toBeLessThan(0);
-    // yards is rounded to the nearest half-yard of the carrier's LOS-relative x.
-    expect(res.yards).toBeCloseTo(lp.carrier.x, 0.5);
+    // yards is rounded to the nearest half-yard of the carrier's LOS-relative x
+    // (not `carrier.x + 6`, which a backfield-start offset would produce).
+    const rounded = Math.round(lp.carrier.x * 2) / 2;
+    expect(res.yards).toBe(rounded);
   });
 
   it('reproduces identical results for a fixed seed and scripted input', () => {

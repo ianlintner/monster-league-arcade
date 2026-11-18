@@ -132,6 +132,8 @@ export interface PlayResult {
   turnoverOnDowns: boolean;
   fumble: boolean;
   fieldGoalGood: boolean;
+  /** True when the down ended by running out of bounds (clock stops, no tackle damage). */
+  outOfBounds: boolean;
   scoringTeam: TeamId | null;
   points: number;
   damage: DamageEvent[];
@@ -157,6 +159,8 @@ export interface SnapOptions {
     sacked?: boolean;
     fumble?: boolean;
     tackleDamage?: number;
+    /** The down ended out of bounds: stop the clock and skip contact damage/fumbles. */
+    outOfBounds?: boolean;
     fieldGoalGood?: boolean;
     puntYards?: number;
     refKilled?: boolean;
@@ -394,6 +398,7 @@ export class GameSession {
     const force = opts.force ?? {};
     // Honor an explicit per-snap override without clobbering a setRefKilledOverride() value.
     if (force.refKilled !== undefined) this.lastForceRefKilled = force.refKilled;
+    const outOfBounds = force.outOfBounds ?? false;
     const { valid, fizzled } = this.validActive();
     const fx = computeEffects(valid);
     const has = (k: NastyKind): boolean => valid.includes(k);
@@ -440,6 +445,7 @@ export class GameSession {
       effects: fx,
       fizzled,
       refKilled: false,
+      outOfBounds,
       banner: '',
     };
 
@@ -577,8 +583,10 @@ export class GameSession {
     } else {
       res.yards = raw.gain;
       this.los = newLos;
-      // Tackle damage on the ball carrier (not on scores).
+      // Tackle damage on the ball carrier (not on scores, and not on an
+      // out-of-bounds finish, which has no contact to injure through).
       if (
+        !outOfBounds &&
         raw.carrier &&
         (raw.kind === 'RUN' || raw.kind === 'PASS_COMPLETE' || raw.kind === 'SACK')
       ) {
@@ -811,6 +819,7 @@ export class GameSession {
       res.kind === 'FIELD_GOAL' ||
       res.kind === 'INTERCEPTION' ||
       res.turnoverOnDowns ||
+      res.outOfBounds ||
       (res.fumble && res.turnover);
     this.clockRunning = !stops;
     this.clock = Math.max(0, this.clock - (stops ? STOPPED_PLAY_SECONDS : PLAY_SECONDS));

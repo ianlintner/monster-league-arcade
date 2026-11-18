@@ -273,9 +273,11 @@ export class MatchScene extends Phaser.Scene {
   private commitOutcome(): void {
     const r = this.liveResult!;
     // The live carrier's final downfield position IS the gain from scrimmage;
-    // keep it fractional so GameSession classifies TDs/safeties exactly.
+    // keep it fractional so GameSession classifies TDs/safeties exactly. Pass the
+    // out-of-bounds whistle through so the session stops the clock and skips
+    // tackle damage / contact fumbles on an untouched sideline exit.
     const yards = r.finalX;
-    const res = this.session.snap({ force: { yards } });
+    const res = this.session.snap({ force: { yards, outOfBounds: r.outOfBounds } });
     this.bannerText = res.banner;
     this.bannerTimer = 2.2;
     this.mode = 'BANNER';

@@ -125,8 +125,8 @@ export interface LivePlaySnapshot {
 
 /** Movement tuning — see PLAN §2.4 and the card's "movement feel" targets. */
 export const LIVE_TUNING = {
-  /** Reach ~top speed in 0.25 s (steep accel). */
-  accelTimeSeconds: 0.25,
+  /** Reach ~95% top speed within 0.25 s (steep accel exponential time constant). */
+  accelTimeSeconds: 0.08,
   /** Hard cut costs ~30% of current speed (turn damping). */
   cutSpeedRetention: 0.7,
   /** Turbo multiplier (+35%). */
@@ -142,6 +142,8 @@ export const LIVE_TUNING = {
   hitStopSeconds: 0.06,
   /** Tackle contact distance (yards). */
   tackleRadius: 1.1,
+  /** Blocking contact distance (yards) that engages a defender. */
+  blockRadius: 1.5,
   /** Fixed timestep. */
   dt: 1 / 60,
 } as const;
@@ -350,18 +352,34 @@ export class LivePlay {
 
   private advanceAI(): void {
     const carrier = this.carrier;
+    // Blockers: offensive non-carriers that can engage a defender in contact.
+    const blockers = this.actors.filter((a) => a.side === 'OFFENSE' && !a.downed);
     for (const a of this.actors) {
       if (a.downed || a === carrier) continue;
       const spec = this.input.actors.find((s) => s.id === a.id)!;
 
+      // A defender in contact with a blocker is engaged: the blocker stalls the
+      // pursuit so the offensive line provides real protection on run plays.
+      a.engaged = false;
+      if (a.side === 'DEFENSE') {
+        for (const b of blockers) {
+          if (b === carrier || b === a) continue;
+          if (dist(a.x, a.y, b.x, b.y) <= LIVE_TUNING.blockRadius) {
+            a.engaged = true;
+            break;
+          }
+        }
+      }
+
       // Defense pursues the carrier; offense (non-carrier) drifts forward to block.
+      const engagedDamp = a.engaged ? 0.1 : 1; // engaged defenders crawl, not run
       const targetX = a.side === 'DEFENSE' ? carrier.x : a.x + 2;
       const targetY = a.side === 'DEFENSE' ? carrier.y : a.y;
       const dx = targetX - a.x;
       const dy = targetY - a.y;
       const m = Math.hypot(dx, dy) || 1;
-      const desiredVx = (dx / m) * spec.topSpeed;
-      const desiredVy = (dy / m) * spec.topSpeed;
+      const desiredVx = (dx / m) * spec.topSpeed * engagedDamp;
+      const desiredVy = (dy / m) * spec.topSpeed * engagedDamp;
       const k = 1 - Math.exp(-LIVE_TUNING.dt / LIVE_TUNING.accelTimeSeconds);
       a.vx += (desiredVx - a.vx) * k;
       a.vy += (desiredVy - a.vy) * k;
@@ -388,10 +406,13 @@ export class LivePlay {
       this.end('SCORE', null);
       return;
     }
-    // The offense's own end line is NOT a whistle: the ball stays live until a
-    // tackle or bounds exit. Whether the final spot becomes a safety is decided
-    // by `GameSession` from the committed fractional yardage, so reserving SCORE
-    // here keeps `result().touchdown` from also reporting safeties as TDs.
+    // Exiting through the back of the offense's own end zone (10 yards past the
+    // own goal line) ends the down via bounds; the session classifies the safety
+    // from the committed negative yardage. Entry into the end zone stays live.
+    if (c.x <= -this.input.los - 10) {
+      this.end('OUT_OF_BOUNDS', null);
+      return;
+    }
 
     // Tackle: nearest defender within tackle radius engages.
     const radius: number = LIVE_TUNING.tackleRadius;
