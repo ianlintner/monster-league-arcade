@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  LIVE_TUNING,
-  LivePlay,
-  type LiveActorSpec,
-  type LivePlayInput,
-} from './LivePlay';
+import { LIVE_TUNING, LivePlay, type LiveActorSpec, type LivePlayInput } from './LivePlay';
 
 /** Build a minimalist 14-actor input: 7 offense + 7 defense, carrier = home-RB1. */
 function makeInput(overrides: Partial<LivePlayInput> = {}): LivePlayInput {

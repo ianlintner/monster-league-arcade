@@ -22,15 +22,8 @@ import {
 } from '../sim/Playbook';
 import type { OffensePlay, DefensePlay, Waypoint } from '../sim/Playbook';
 import type { OffenseSlot, DefenseSlot, Player } from '../sim/Roster';
-import {
-  OFFENSE_SLOTS,
-  DEFENSE_SLOTS,
-} from '../sim/Roster';
-import type {
-  LiveActorSpec,
-  LivePlayInput,
-  LiveWaypoint,
-} from './LivePlay';
+import { OFFENSE_SLOTS, DEFENSE_SLOTS } from '../sim/Roster';
+import type { LiveActorSpec, LivePlayInput, LiveWaypoint } from './LivePlay';
 
 /** Map a 20-99 `speed` rating to a yards/second top speed (~4.2 .. 11 yd/s). */
 export function speedToYardSpeed(speed: number): number {
@@ -143,11 +136,7 @@ export function buildLivePlayInput(
  * projection25d field coordinates. The offense drives +x along the field; the LOS
  * is at `los` yards from the offense's own goal line + the 10-yard end zone.
  */
-export function projectActor(
-  liveX: number,
-  liveY: number,
-  los: number,
-): { x: number; y: number } {
+export function projectActor(liveX: number, liveY: number, los: number): { x: number; y: number } {
   const fieldX = 10 + los + liveX; // 10 = own end zone; los in [0,100]
   const fieldY = 26.5 + liveY; // 26.5 = field centre across 53
   return { x: Math.max(0, Math.min(120, fieldX)), y: Math.max(0, Math.min(53, fieldY)) };

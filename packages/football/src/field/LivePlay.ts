@@ -84,8 +84,7 @@ export interface LiveActorState {
 }
 
 export type LivePlayOutcome =
-  | { kind: 'WHISTLE'; reason: 'TACKLE' | 'OUT_OF_BOUNDS' | 'SCORE' }
-  | { kind: 'RUNNING' };
+  { kind: 'WHISTLE'; reason: 'TACKLE' | 'OUT_OF_BOUNDS' | 'SCORE' } | { kind: 'RUNNING' };
 
 export interface LivePlayResult {
   outcome: LivePlayOutcome;
@@ -277,7 +276,8 @@ export class LivePlay {
     const headingMag = Math.hypot(c.vx, c.vy);
     if (headingMag > 1e-3) {
       const dot =
-        (c.vx * desiredVx + c.vy * desiredVy) / (headingMag * (Math.hypot(desiredVx, desiredVy) || 1));
+        (c.vx * desiredVx + c.vy * desiredVy) /
+        (headingMag * (Math.hypot(desiredVx, desiredVy) || 1));
       if (dot < 0.5) {
         const scale = LIVE_TUNING.cutSpeedRetention;
         c.vx *= scale;
