@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Monster League Art Uplift — Asset Gallery</title>
+    <style>
+      :root {
+        --bg: #1a1426;
+        --fg: #f4efe6;
+        --dim: #8a84a0;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 24px;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: monospace;
+      }
+      h1 {
+        font-size: 18px;
+        margin: 0 0 4px;
+      }
+      h2 {
+        font-size: 13px;
+        color: var(--dim);
+        border-bottom: 1px solid #3a3450;
+        padding-bottom: 4px;
+        margin: 24px 0 12px;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 24px;
+      }
+      .card {
+        width: 268px;
+      }
+      .card .lbl {
+        font-size: 11px;
+        color: var(--dim);
+        margin-bottom: 6px;
+      }
+      .card canvas {
+        image-rendering: pixelated;
+        background: #0b0711;
+        outline: 1px solid #0b0711;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(4, 256px);
+        gap: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Monster League Arcade — art uplift gallery</h1>
+    <p style="color: var(--dim); font-size: 12px">
+      Factions read clearly at 1x: domed helmet + facemask, shoulder pads wider than hips, one
+      unmistakable faction feature. Rendered at 4x nearest-neighbour below.
+    </p>
+
+    <h2>Faction sprites — idle + run (SE) + death, home &amp; away</h2>
+    <div id="sprite-grid" class="grid"></div>
+
+    <h2>Portraits (coach / ref / announcer)</h2>
+    <div id="portrait-row" class="row"></div>
+
+    <h2>Crests</h2>
+    <div id="crest-row" class="row"></div>
+
+    <h2>Arena turf</h2>
+    <div id="turf-row" class="row"></div>
+
+    <script>
+      // 48x48 sprite sheets: 6 cols. Show idle row (row 0, 4 frames) and SE run (row 1) + death (row 13).
+      const factions = [
+        ['boneyard_reapers', 'Reapers'],
+        ['rotting_deadskins', 'Deadskins'],
+        ['transylvania_nightstalkers', 'Nightstalkers'],
+        ['salem_bayou_ghouls', 'Ghouls'],
+      ];
+      const SCALE = 4;
+      const CELL = 48;
+      const COLS = 6;
+
+      function spriteCanvas(src, row, frames, scale) {
+        const c = document.createElement('canvas');
+        c.width = frames * CELL * scale;
+        c.height = CELL * scale;
+        const ctx = c.getContext('2d');
+        ctx.imageSmoothingEnabled = false;
+        const img = new Image();
+        img.onload = () => {
+          for (let f = 0; f < frames; f++)
+            ctx.drawImage(
+              img,
+              f * CELL,
+              row * CELL,
+              CELL,
+              CELL,
+              f * CELL * scale,
+              0,
+              CELL * scale,
+              CELL * scale,
+            );
+        };
+        img.src = src;
+        return c;
+      }
+
+      function sheetGrid(parent, src, title, frames) {
+        const card = document.createElement('div');
+        card.className = 'card';
+        const lbl = document.createElement('div');
+        lbl.className = 'lbl';
+        lbl.textContent = title;
+        card.appendChild(lbl);
+        card.appendChild(spriteCanvas(src, frames));
+        parent.appendChild(card);
+      }
+
+      const spriteGrid = document.getElementById('sprite-grid');
+      for (const [id, label] of factions) {
+        for (const [suffix, side] of [
+          ['', 'home'],
+          ['-away', 'away'],
+        ]) {
+          const card = document.createElement('div');
+          card.className = 'card';
+          const lbl = document.createElement('div');
+          lbl.className = 'lbl';
+          lbl.textContent = `${label} (${side})`;
+          card.appendChild(lbl);
+          const src = `/assets/sprites/${id}${suffix}.png`;
+          // idle (row 0), SE run (row 1), death (row 13)
+          for (const [row, name] of [
+            [0, 'idle'],
+            [1, 'run'],
+            [13, 'death'],
+          ]) {
+            const sub = document.createElement('div');
+            sub.className = 'lbl';
+            sub.textContent = name;
+            card.appendChild(sub);
+            card.appendChild(spriteCanvas(src, row, 6, SCALE));
+          }
+          spriteGrid.appendChild(card);
+        }
+      }
+
+      function imgCard(parent, src, label, scale) {
+        const card = document.createElement('div');
+        card.className = 'card';
+        const lbl = document.createElement('div');
+        lbl.className = 'lbl';
+        lbl.textContent = label;
+        card.appendChild(lbl);
+        const img = document.createElement('img');
+        img.src = src;
+        img.style.width = `${img.naturalWidth * scale}px`;
+        img.style.imageRendering = 'pixelated';
+        img.style.background = '#0b0711';
+        img.onload = () => {
+          img.style.width = `${img.naturalWidth * scale}px`;
+        };
+        card.appendChild(img);
+        parent.appendChild(card);
+      }
+
+      const pRow = document.getElementById('portrait-row');
+      [
+        ['coach_boneyard_reapers', 'Reapers coach'],
+        ['coach_rotting_deadskins', 'Deadskins coach'],
+        ['coach_transylvania_nightstalkers', 'Nightstalkers coach'],
+        ['coach_salem_bayou_ghouls', 'Ghouls coach'],
+        ['necro_ref', 'Necro ref'],
+        ['demon_ref', 'Demon ref'],
+        ['crypt_announcer', 'Announcer'],
+      ].forEach(([id, l]) => imgCard(pRow, `/assets/portraits/${id}.png`, l, 4));
+
+      const cRow = document.getElementById('crest-row');
+      factions.forEach(([id, l]) =>
+        imgCard(cRow, `/assets/sprites/crest_${id}.png`, `${l} crest`, 4),
+      );
+
+      const tRow = document.getElementById('turf-row');
+      [
+        ['cursed_graveyard', 'Graveyard'],
+        ['brimstone_hellfire_pit', 'Hellfire pit'],
+        ['ectoplasm_swamp', 'Swamp'],
+      ].forEach(([id, l]) => imgCard(tRow, `/assets/arenas/${id}_turf.png`, `${l} turf`, 4));
+    </script>
+  </body>
+</html>
