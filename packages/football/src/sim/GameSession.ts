@@ -597,7 +597,10 @@ export class GameSession {
         if (this.winner !== null) return this.finishForfeit(res);
         if (this.carrierFumbled) raw.fumble = true;
       }
-      if (raw.fumble) {
+      // An out-of-bounds finish has no contact, so an ordinary fumble coin-flip
+      // cannot resolve on a clean sideline/end-zone exit. (Lethal hazard fumbles
+      // are handled earlier and legitimately still turn the ball over.)
+      if (raw.fumble && !outOfBounds) {
         res.fumble = true;
         // A lethal hit leaves the defense with the ball; ordinary fumbles are a coin flip.
         const lost =
