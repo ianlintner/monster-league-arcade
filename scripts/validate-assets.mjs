@@ -148,6 +148,18 @@ for (const id of S.SPRITE_SHEETS) {
   });
   count++;
 }
+for (const id of S.AWAY_SHEETS) {
+  await checkFile(P(`sprites/${id}-away.png`), {
+    w: S.SHEET_COLS * S.SPRITE_CELL,
+    h: S.SHEET_ROWS * S.SPRITE_CELL,
+    cw: 48,
+    ch: 48,
+    outline: true,
+    minOpaque: 1000,
+    requiredCells: { cells: spriteCells, min: 24 },
+  });
+  count++;
+}
 for (const id of S.CREST_FACTIONS) {
   await checkFile(P(`sprites/crest_${id}.png`), {
     w: 64,

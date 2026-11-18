@@ -336,8 +336,8 @@ function drawUpright(b, id, p) {
 }
 
 /** Horizontal body (dive, knockdown, collapse). dirX: 1 head right; up: lying on back face-up. */
-function drawHoriz(b, id, { x = 6, y = 28, dirX = 1, tilt = 0, smear = 0 } = {}) {
-  const st = uniform(id);
+function drawHoriz(b, id, { x = 6, y = 28, dirX = 1, tilt = 0, smear = 0, away = false } = {}) {
+  const st = uniform(id, away);
   const px = (rx) => (dirX === 1 ? x + rx : 47 - x - rx);
   const R = (rx, ry, w, h, c) =>
     b.rect(dirX === 1 ? px(rx) : px(rx) - w + 1, y + ry + tilt, w, h, c);
@@ -390,12 +390,13 @@ const RUN_GAIT = [
   { lx: -3, ll: 0, rx: 2, rl: 0, al: [-3, 9], ar: [2, 7] }, // contact (mirrored)
 ];
 
-function drawFrame(id, anim, f, dirIdx = 0) {
+function drawFrame(id, anim, f, dirIdx = 0, away = false) {
   const b = new Buf(48, 48);
   const bounce = [0, 1, 0, 1][f % 4];
+  const av = { away };
   switch (anim) {
     case 'idle_stance':
-      drawUpright(b, id, { bob: bounce, al: [-3, 7 + bounce], ar: [3, 7 - bounce] });
+      drawUpright(b, id, { bob: bounce, al: [-3, 7 + bounce], ar: [3, 7 - bounce], ...av });
       break;
     case 'run_8dir': {
       const v = DIRS[dirIdx];
@@ -418,6 +419,7 @@ function drawFrame(id, anim, f, dirIdx = 0) {
         rl: side ? g.rl : g.rl,
         al: side ? [2 * dir, 8 - (g.al[1] - 7)] : g.al,
         ar: side ? [-2 * dir, 8 - (g.ar[1] - 7)] : g.ar,
+        ...av,
       });
       // dust puffs under the planted foot on contact frames
       if (f % 3 === 0) {
@@ -440,17 +442,30 @@ function drawFrame(id, anim, f, dirIdx = 0) {
         ar: [-2, 6],
         al,
         hold: f < 3 ? [6 - f * 2, f === 1 ? -9 : 2] : null,
+        ...av,
       });
       break;
     }
     case 'dive_tackle_lunge':
       // Keep the body + motion smear inside the 48px cell with a >=1px margin (max
       // head-right 45, min smear-left 2). Originally { x:[8,4,2], smear:f+1 } clipped.
-      drawHoriz(b, id, { x: [8, 6, 5][f], y: [22, 26, 32][f], tilt: 0, smear: [1, 2, 3][f] });
+      drawHoriz(b, id, {
+        x: [8, 6, 5][f],
+        y: [22, 26, 32][f],
+        tilt: 0,
+        smear: [1, 2, 3][f],
+        ...av,
+      });
       break;
     case 'hit_stagger_knockdown': {
       if (f === 0) {
-        drawUpright(b, id, { view: { kind: 'side', s: 1 }, lean: -2, al: [-5, 4], ar: [5, 3] });
+        drawUpright(b, id, {
+          view: { kind: 'side', s: 1 },
+          lean: -2,
+          al: [-5, 4],
+          ar: [5, 3],
+          ...av,
+        });
         b.recolorSolid(M.BONE_WHITE);
       } else if (f === 1)
         drawUpright(b, id, {
@@ -459,12 +474,14 @@ function drawFrame(id, anim, f, dirIdx = 0) {
           bob: 1,
           al: [-6, 2],
           ar: [6, 1],
+          ...av,
         });
-      else drawHoriz(b, id, { x: 4, y: f === 2 ? 32 : 31, dirX: -1, tilt: f === 3 ? -1 : 0 });
+      else
+        drawHoriz(b, id, { x: 4, y: f === 2 ? 32 : 31, dirX: -1, tilt: f === 3 ? -1 : 0, ...av });
       break;
     }
     case 'casualty_death':
-      death(b, id, f);
+      death(b, id, f, away);
       break;
     case 'celebration': {
       // Distinct pose per faction via a small pose table.
@@ -498,6 +515,7 @@ function drawFrame(id, anim, f, dirIdx = 0) {
       drawUpright(b, id, {
         view: { kind: 'front', s: 0 },
         ...pose,
+        ...av,
       });
       b.rect(
         10 + f * 8,
@@ -512,19 +530,26 @@ function drawFrame(id, anim, f, dirIdx = 0) {
   return b;
 }
 
-function death(b, id, f) {
+function death(b, id, f, away = false) {
   void id;
   if (f === 0) {
-    drawUpright(b, id, { view: { kind: 'side', s: 1 }, lean: -3, al: [-6, 2], ar: [6, 2] });
+    drawUpright(b, id, { view: { kind: 'side', s: 1 }, lean: -3, al: [-6, 2], ar: [6, 2], away });
     b.recolorSolid(M.BONE_WHITE);
     return;
   }
   if (f === 1) {
-    drawUpright(b, id, { view: { kind: 'side', s: 1 }, lean: -5, bob: 3, al: [-7, 0], ar: [7, 0] });
+    drawUpright(b, id, {
+      view: { kind: 'side', s: 1 },
+      lean: -5,
+      bob: 3,
+      al: [-7, 0],
+      ar: [7, 0],
+      away,
+    });
     return;
   }
   if (f === 2) {
-    drawHoriz(b, id, { x: 4, y: 33, dirX: -1 });
+    drawHoriz(b, id, { x: 4, y: 33, dirX: -1, away });
     return;
   }
   const t = f - 3; // 0..2
@@ -911,14 +936,26 @@ async function sheet(path, cols, rows, cw, ch, frames, opts) {
 async function main() {
   const layout = [];
   for (const id of S.SPRITE_SHEETS) {
-    const frames = [];
-    let row = 0;
-    for (const a of S.ANIMATIONS) {
-      for (let r = 0; r < a.rows; r++, row++)
-        for (let f = 0; f < a.frames; f++)
-          frames.push({ col: f, row, buf: drawFrame(id, a.name, f, r) });
+    for (const away of [false, S.AWAY_SHEETS.includes(id) ? true : null]) {
+      if (away === null) continue;
+      const name = away ? `${id}-away` : id;
+      const frames = [];
+      let row = 0;
+      for (const a of S.ANIMATIONS) {
+        for (let r = 0; r < a.rows; r++, row++)
+          for (let f = 0; f < a.frames; f++)
+            frames.push({ col: f, row, buf: drawFrame(id, a.name, f, r, away) });
+      }
+      await sheet(
+        join(OUT, 'sprites', `${name}.png`),
+        S.SHEET_COLS,
+        S.SHEET_ROWS,
+        48,
+        48,
+        frames,
+        {},
+      );
     }
-    await sheet(join(OUT, 'sprites', `${id}.png`), S.SHEET_COLS, S.SHEET_ROWS, 48, 48, frames, {});
   }
   let row = 0;
   for (const a of S.ANIMATIONS) {
@@ -986,6 +1023,7 @@ async function main() {
           animations: layout,
           run_8dir_order: ['S', 'SE', 'E', 'NE', 'N', 'NW', 'W', 'SW'],
           sheets: S.SPRITE_SHEETS,
+          away_sheets: S.AWAY_SHEETS,
           crests: S.CREST_FACTIONS,
         },
         portraits: { cell: 64, frames: 2, ids: S.PORTRAITS },

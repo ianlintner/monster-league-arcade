@@ -53,10 +53,13 @@ async function main() {
   // Optional sprite dir lets callers capture a "before" sheet from a pristine
   // checkout (e.g. git show) without overwriting the regenerated assets.
   const spritesDir = process.argv[3] ?? join(OUT, 'sprites');
-  const sheets = S.SPRITE_SHEETS; // 4 factions + 2 refs
+  const sheets = [
+    ...S.SPRITE_SHEETS.map((id) => ({ file: id, label: id })),
+    ...S.AWAY_SHEETS.map((id) => ({ file: `${id}-away`, label: `${id}\n(away)` })),
+  ];
   const rows = [];
-  for (const id of sheets) {
-    const path = join(spritesDir, `${id}.png`);
+  for (const { file, label } of sheets) {
+    const path = join(spritesDir, `${file}.png`);
     const { data, info } = await sharp(path)
       .ensureAlpha()
       .raw()
@@ -76,7 +79,7 @@ async function main() {
           );
         cells.push(cell);
       }
-      rows.push({ id, name: s.name, cells });
+      rows.push({ id: label, name: s.name, cells });
     }
   }
 
