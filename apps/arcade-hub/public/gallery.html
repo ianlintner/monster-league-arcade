@@ -36,7 +36,10 @@
         gap: 24px;
       }
       .card {
-        width: 268px;
+        /* Sized to its contents: full-width sprite strips (6×48×4 = 1152px) must
+           not be clipped or overlap neighbours, so there is no fixed width here. */
+        display: inline-block;
+        vertical-align: top;
       }
       .card .lbl {
         font-size: 11px;
@@ -48,10 +51,12 @@
         background: #0b0711;
         outline: 1px solid #0b0711;
       }
-      .grid {
+      /* One sprite strip per grid row so a full-width canvas never overflows the
+         column track of a fixed 4×256px grid onto the next card. */
+      .sprite-grid {
         display: grid;
-        grid-template-columns: repeat(4, 256px);
-        gap: 8px;
+        grid-template-columns: 1fr;
+        gap: 16px;
       }
     </style>
   </head>
@@ -63,7 +68,7 @@
     </p>
 
     <h2>Faction sprites — idle + run (SE) + death, home &amp; away</h2>
-    <div id="sprite-grid" class="grid"></div>
+    <div id="sprite-grid" class="sprite-grid"></div>
 
     <h2>Portraits (coach / ref / announcer)</h2>
     <div id="portrait-row" class="row"></div>
@@ -75,7 +80,9 @@
     <div id="turf-row" class="row"></div>
 
     <script>
-      // 48x48 sprite sheets: 6 cols. Show idle row (row 0, 4 frames) and SE run (row 1) + death (row 13).
+      // 48x48 sprite sheets: 6 cols. Atlas rows (from public/assets/atlas.json):
+      //   idle_stance row 0 (4 frames), run_8dir rows 1..8 (S,SE,E,NE,N,NW,W,SW),
+      //   6 frames each, casualty_death row 12 (6 frames), celebration row 13.
       const factions = [
         ['boneyard_reapers', 'Reapers'],
         ['rotting_deadskins', 'Deadskins'],
@@ -84,7 +91,30 @@
       ];
       const SCALE = 4;
       const CELL = 48;
-      const COLS = 6;
+
+      // All image loads (both sprite canvases below and <img> elements) register
+      // here so the e2e screenshot test can await a single completion signal
+      // instead of only the detached Image() loads it cannot see.
+      const pendingLoads = new Set();
+      let settleTimer = null;
+      window.__galleryReady = new Promise((resolve) => {
+        window.__galleryResolveReady = resolve;
+      });
+      function scheduleReady() {
+        clearTimeout(settleTimer);
+        settleTimer = setTimeout(() => {
+          if (pendingLoads.size === 0) window.__galleryResolveReady();
+        }, 0);
+      }
+      function trackLoad(src) {
+        const token = {};
+        pendingLoads.add(token);
+        const release = () => {
+          pendingLoads.delete(token);
+          scheduleReady();
+        };
+        return { release, src };
+      }
 
       function spriteCanvas(src, row, frames, scale) {
         const c = document.createElement('canvas');
@@ -93,6 +123,7 @@
         const ctx = c.getContext('2d');
         ctx.imageSmoothingEnabled = false;
         const img = new Image();
+        const { release } = trackLoad(src);
         img.onload = () => {
           for (let f = 0; f < frames; f++)
             ctx.drawImage(
@@ -106,20 +137,16 @@
               CELL * scale,
               CELL * scale,
             );
+          release();
+        };
+        img.onerror = () => {
+          // A failed sprite load must not hang the readiness signal: mark the
+          // canvas with a distinguishable blank cell and still release.
+          console.error(`sprite load failed: ${src}`);
+          release();
         };
         img.src = src;
         return c;
-      }
-
-      function sheetGrid(parent, src, title, frames) {
-        const card = document.createElement('div');
-        card.className = 'card';
-        const lbl = document.createElement('div');
-        lbl.className = 'lbl';
-        lbl.textContent = title;
-        card.appendChild(lbl);
-        card.appendChild(spriteCanvas(src, frames));
-        parent.appendChild(card);
       }
 
       const spriteGrid = document.getElementById('sprite-grid');
@@ -135,17 +162,17 @@
           lbl.textContent = `${label} (${side})`;
           card.appendChild(lbl);
           const src = `/assets/sprites/${id}${suffix}.png`;
-          // idle (row 0), SE run (row 1), death (row 13)
-          for (const [row, name] of [
-            [0, 'idle'],
-            [1, 'run'],
-            [13, 'death'],
+          // idle (row 0, 4 frames), SE run (row 2, 6 frames), death (row 12, 6 frames)
+          for (const [row, name, frames] of [
+            [0, 'idle', 4],
+            [2, 'run (SE)', 6],
+            [12, 'death', 6],
           ]) {
             const sub = document.createElement('div');
             sub.className = 'lbl';
             sub.textContent = name;
             card.appendChild(sub);
-            card.appendChild(spriteCanvas(src, row, 6, SCALE));
+            card.appendChild(spriteCanvas(src, row, frames, SCALE));
           }
           spriteGrid.appendChild(card);
         }
@@ -159,13 +186,15 @@
         lbl.textContent = label;
         card.appendChild(lbl);
         const img = document.createElement('img');
+        const { release } = trackLoad(src);
         img.src = src;
-        img.style.width = `${img.naturalWidth * scale}px`;
-        img.style.imageRendering = 'pixelated';
-        img.style.background = '#0b0711';
         img.onload = () => {
           img.style.width = `${img.naturalWidth * scale}px`;
+          release();
         };
+        img.onerror = () => release();
+        img.style.imageRendering = 'pixelated';
+        img.style.background = '#0b0711';
         card.appendChild(img);
         parent.appendChild(card);
       }
@@ -192,6 +221,10 @@
         ['brimstone_hellfire_pit', 'Hellfire pit'],
         ['ectoplasm_swamp', 'Swamp'],
       ].forEach(([id, l]) => imgCard(tRow, `/assets/arenas/${id}_turf.png`, `${l} turf`, 4));
+
+      // Initial settle check: if tracking began after all loads already finished
+      // (unlikely), still resolve.
+      scheduleReady();
     </script>
   </body>
 </html>

@@ -6,7 +6,7 @@
 // a paid request can never be omitted from the budget ledger. Needs FAL_KEY.
 // Usage: node scripts/generate-images.mjs [--force]
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
@@ -108,7 +108,11 @@ const SUBJECTS = [
   },
 ];
 
-const spendOf = (m) => (m.entries ?? []).reduce((s, e) => s + (e.costUsd ?? 0), 0);
+// Sum image spend only. The ledger is shared with generate-announcer.mjs, whose
+// `kind: 'audio'` entries draw from a separate budget; counting them here would
+// shrink the image cap and misreport image spending.
+const isImage = (e) => (e.kind ?? '') !== 'audio';
+const spendOf = (m) => (m.entries ?? []).filter(isImage).reduce((s, e) => s + (e.costUsd ?? 0), 0);
 
 const normalize = (src, dest, opts = []) =>
   execFileSync(process.execPath, [join(ROOT, 'scripts/normalize-art.mjs'), src, dest, ...opts]);
@@ -136,6 +140,65 @@ async function generate(s) {
   return { body, cost: cost * 2 };
 }
 
+/**
+ * Derive a jaw-open variant of a 64x64 portrait bust so the two-frame talk
+ * animation has real motion (col0 = mouth closed, col1 = mouth/jaw dropped).
+ * Deterministic: shifts the lower-face band down 2px and inserts a 2px mouth
+ * gap, without touching the upper head or chest. The result is re-normalized
+ * (palette + outline) alongside the closed frame, so it stays validator-clean.
+ */
+async function jawDrop(src, out) {
+  const { data, info } = await sharp(src).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const w = info.width;
+  const h = info.height;
+  const dst = new Uint8Array(data); // copy
+  const col = (x, y) => (y * w + x) * 4;
+  const put = (x, y, i) => dst.set(data.subarray(i, i + 4), col(x, y));
+  const MOUTH_TOP = Math.floor(h * 0.6); // ~y38 on a 64px bust
+  const MOUTH_BOT = Math.floor(h * 0.78); // ~y50
+  const drop = Math.max(1, Math.floor(h * 0.03)); // ~2px
+  // shift the mouth band down, bottom-up so we don't clobber source rows
+  for (let y = MOUTH_BOT - 1; y >= MOUTH_TOP; y--)
+    for (let x = 0; x < w; x++) if (data[col(x, y) + 3] !== 0) put(x, y + drop, col(x, y));
+  // clear the vacated band to transparent, leaving a mouth gap
+  for (let y = MOUTH_TOP; y < MOUTH_TOP + drop; y++)
+    for (let x = 0; x < w; x++) dst[col(x, y) + 3] = 0;
+  await sharp(Buffer.from(dst), { raw: { width: w, height: h, channels: 4 } })
+    .png()
+    .toFile(out);
+}
+
+/**
+ * Post-normalize QA before a candidate replaces the on-disk destinaton. Mirrors
+ * the validator's occupancy rules so a uniform-background subject that
+ * normalizes to near-transparency is rejected instead of recorded as `pass`.
+ */
+async function qaCheck(path, kind) {
+  const { data, info } = await sharp(path)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const w = info.width;
+  const h = info.height;
+  let opaque = 0;
+  let transparent = 0;
+  for (let i = 0; i < w * h; i++)
+    if (data[i * 4 + 3] === 0) transparent++;
+    else opaque++;
+  if (kind === 'arena') return transparent === 0; // opaque tiling tile: no gaps
+  if (kind === 'portrait') {
+    // 128x64 = two 64x64 cells; each must carry at least 100 opaque px (validator min)
+    const cellOpaque = (col) => {
+      let n = 0;
+      for (let y = 0; y < 64; y++)
+        for (let x = 0; x < 64; x++) if (data[(y * w + col * 64 + x) * 4 + 3] !== 0) n++;
+      return n;
+    };
+    return opaque >= 400 && cellOpaque(0) >= 100 && cellOpaque(1) >= 100;
+  }
+  return opaque >= 200; // crest
+}
+
 async function main() {
   if (!process.env.FAL_KEY) throw new Error('FAL_KEY not set');
   const manifest = existsSync(manifestPath)
@@ -143,7 +206,7 @@ async function main() {
     : { entries: [] };
   manifest.entries ??= [];
   const force = process.argv.includes('--force');
-  const spent = () => spendOf(manifest);
+  const perCall = parseFloat((2 * COST_PER_MP).toFixed(4));
 
   for (const s of SUBJECTS) {
     const kindDir = s.kind === 'portrait' ? 'portraits' : s.kind === 'crest' ? 'sprites' : 'arenas';
@@ -158,15 +221,16 @@ async function main() {
       console.log(`skip ${dest} (exists)`);
       continue;
     }
-    // Budget guard: estimate up front and stop BEFORE spending over the cap.
-    const cost = parseFloat((2 * COST_PER_MP).toFixed(4));
-    if (spent() + cost > BUDGET)
-      throw new Error(`budget exceeded (${spent()} + ${cost} > ${BUDGET})`);
 
     // One asset per call; reject + retry at most twice, then fall back to the
     // procedural generator (which already produced these deterministic stills).
     let ok = false;
     for (let attempt = 1; attempt <= 2 && !ok; attempt++) {
+      // Budget guard immediately before every paid attempt, not just the first.
+      const spent = spendOf(manifest);
+      if (spent + perCall > BUDGET)
+        throw new Error(`budget exceeded (${spent} + ${perCall} > ${BUDGET})`);
+
       const { body, cost: actualCost } = await generate(s);
       // Log the paid call BEFORE any download/normalize step can fail.
       manifest.entries.push({
@@ -183,26 +247,32 @@ async function main() {
       });
       writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
-      const img = body.images?.[0];
-      if (!img?.url) throw new Error('fal response missing image url');
-      const rawPng = Buffer.from(await (await fetch(img.url)).arrayBuffer());
-      const rawPath = join(ROOT, `.cache-${s.id}-${attempt}.png`);
-      writeFileSync(rawPath, rawPng);
-
-      // Downscale to the target cell, then normalize (palette + outline).
-      const target = s.kind === 'portrait' ? 128 : 64; // portrait sheet is 128x64 (2 cols)
-      const cellPng = join(ROOT, `.cell-${s.id}-${attempt}.png`);
-      await sharp(rawPng)
-        .resize(target, 64, { kernel: 'nearest', fit: 'cover' })
-        .png()
-        .toFile(cellPng);
-
+      // Download + decode + normalize ALL live inside the attempt try block so a
+      // failed download or invalid image takes the retry/fallback path instead of
+      // aborting the script with a dangling paid entry.
       try {
-        if (s.kind === 'arena') normalize(cellPng, dest, ['--opaque']);
+        const img = body.images?.[0];
+        if (!img?.url) throw new Error('fal response missing image url');
+        const dl = await fetch(img.url);
+        if (!dl.ok) throw new Error(`image download HTTP ${dl.status}`);
+        const rawPng = Buffer.from(await dl.arrayBuffer());
+        const rawPath = join(ROOT, `.cache-${s.id}-${attempt}.png`);
+        writeFileSync(rawPath, rawPng);
+
+        // Every cell is 64x64: resize the single subject to a 64x64 cell, and only
+        // the assembled two-frame portrait sheet should be 128x64.
+        const cellPng = join(ROOT, `.cell-${s.id}-${attempt}.png`);
+        await sharp(rawPng)
+          .resize(64, 64, { kernel: 'nearest', fit: 'cover' })
+          .png()
+          .toFile(cellPng);
+
+        const candidate = `${dest}.candidate.png`;
+        if (s.kind === 'arena') normalize(cellPng, candidate, ['--opaque']);
         else if (s.kind === 'portrait') {
-          // 128x64 single frame → duplicate to a 2-col sheet (jaw edit derived locally).
+          const jawPng = join(ROOT, `.jaw-${s.id}-${attempt}.png`);
+          await jawDrop(cellPng, jawPng);
           const single = join(ROOT, `.single-${s.id}.png`);
-          // Build a 2-col sheet from the one generated frame: col0 = as-is, col1 = jaw drop.
           const sheet = await sharp({
             create: {
               width: 128,
@@ -212,16 +282,21 @@ async function main() {
             },
           })
             .composite([
-              { input: cellPng, left: 0, top: 0 },
-              { input: cellPng, left: 64, top: 0 },
+              { input: cellPng, left: 0, top: 0 }, // closed mouth
+              { input: jawPng, left: 64, top: 0 }, // jaw-open second frame
             ])
             .png()
             .toBuffer();
           await sharp(sheet).png().toFile(single);
-          // Jaw drop: brighten the lower face band is approximate; keep col1 identical
-          // then normalize both cells (normalizer will outline each 64px cell).
-          normalize(single, dest, ['--cell', '64x64']);
-        } else normalize(cellPng, dest, []);
+          normalize(single, candidate, ['--cell', '64x64']);
+        } else normalize(cellPng, candidate, []);
+
+        // Validate the candidate before it replaces the destination; a
+        // near-transparent quantise must not overwrite a good procedural asset.
+        if (!(await qaCheck(candidate, s.kind)))
+          throw new Error('candidate failed occupancy QA (too little opaque content)');
+
+        renameSync(candidate, dest);
         ok = true;
         const entry = manifest.entries[manifest.entries.length - 1];
         entry.status = 'normalized';
@@ -229,6 +304,8 @@ async function main() {
         writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
         console.log(`generated ${dest} ($${actualCost.toFixed(4)}, attempt ${attempt})`);
       } catch (err) {
+        const candidate = `${dest}.candidate.png`;
+        if (existsSync(candidate)) unlinkSync(candidate); // never leave a bad candidate behind
         const entry = manifest.entries[manifest.entries.length - 1];
         entry.status = attempt >= 2 ? 'fallback_procedural' : 'rejected';
         entry.qa_verdict = 'fail';
@@ -242,7 +319,7 @@ async function main() {
       console.log(`fallback to procedural for ${dest} (run generate-art.mjs)`);
     }
   }
-  console.log(`image spend: $${spent().toFixed(4)} / $${BUDGET}`);
+  console.log(`image spend: $${spendOf(manifest).toFixed(4)} / $${BUDGET}`);
 }
 
 const isDirectRun = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;

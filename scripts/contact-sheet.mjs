@@ -14,22 +14,17 @@ import * as S from './asset-spec.mjs';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(ROOT, 'public/assets');
 
-// Which animation rows to show, and how many frames each.
+// Which animation rows to show, and how many frames each. `row` overrides the
+// first-row of the named animation (run_8dir spans rows 1..8 in S,SE,E,NE,N,NW,W,SW order).
 const SHOW = [
-  { name: 'idle_stance', frames: 4 },
-  { name: 'run_8dir', frames: 6, row: 1 }, // row 1 = SE (first non-front run dir)
-  { name: 'casualty_death', frames: 6 },
+  { name: 'idle_stance', frames: 4, row: 0 },
+  { name: 'run_SE', frames: 6, row: 2 }, // SE diagonal run
+  { name: 'run_side', frames: 6, row: 3 }, // E side-view run
+  { name: 'casualty_death', frames: 6, row: 12 },
 ];
 
-// Map animation name -> its first row index in the sheet.
-function rowIndex(name) {
-  let row = 0;
-  for (const a of S.ANIMATIONS) {
-    if (a.name === name) return row;
-    row += a.rows;
-  }
-  throw new Error(`unknown animation ${name}`);
-}
+// Each SHOW entry carries an explicit `row`, so the animation-name -> first-row
+// map is not needed at runtime.
 
 const CELL = S.SPRITE_CELL; // 48
 const SCALE = 4;
@@ -47,15 +42,21 @@ async function labelPng(text) {
 async function main() {
   const outPath = process.argv[2];
   if (!outPath) {
-    console.error('usage: node scripts/contact-sheet.mjs <out.png> [sprites-dir]');
+    console.error('usage: node scripts/contact-sheet.mjs <out.png> [sprites-dir] [--home-only]');
     process.exit(2);
   }
   // Optional sprite dir lets callers capture a "before" sheet from a pristine
   // checkout (e.g. git show) without overwriting the regenerated assets.
-  const spritesDir = process.argv[3] ?? join(OUT, 'sprites');
+  const spritesDir = process.argv[3]?.startsWith('--')
+    ? join(OUT, 'sprites')
+    : (process.argv[3] ?? join(OUT, 'sprites'));
+  // --home-only omits the away sheets, which don't exist in a pre-uplift checkout.
+  const homeOnly = process.argv.includes('--home-only');
   const sheets = [
     ...S.SPRITE_SHEETS.map((id) => ({ file: id, label: id })),
-    ...S.AWAY_SHEETS.map((id) => ({ file: `${id}-away`, label: `${id}\n(away)` })),
+    ...(homeOnly
+      ? []
+      : S.AWAY_SHEETS.map((id) => ({ file: `${id}-away`, label: `${id}\n(away)` }))),
   ];
   const rows = [];
   for (const { file, label } of sheets) {
@@ -65,7 +66,7 @@ async function main() {
       .raw()
       .toBuffer({ resolveWithObject: true });
     for (const s of SHOW) {
-      const row = s.row ?? rowIndex(s.name);
+      const row = s.row;
       const cells = [];
       for (let f = 0; f < s.frames; f++) {
         const cell = new Uint8Array(CELL * CELL * 4);

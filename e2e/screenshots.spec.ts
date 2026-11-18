@@ -12,10 +12,19 @@ mkdirSync(OUT, { recursive: true });
 test('captures the asset gallery screenshot', async ({ page }) => {
   await page.goto('/gallery.html');
   await expect(page.locator('h1')).toHaveText(/art uplift gallery/i);
-  // Wait for every <img>/canvas draw to settle (images load async in the gallery).
+  // The gallery draws both <img> elements and sprite strips onto <canvas> from
+  // detached Image() loads that an img.complete check cannot see. Await the
+  // explicit readiness signal the page resolves once every tracked load (canvas
+  // and <img>, including onerror releases) has settled.
+  await page.waitForFunction(
+    () => (window as Window & { __galleryReady?: Promise<void> }).__galleryReady,
+    undefined,
+    { timeout: 10_000 },
+  );
+  // Belt-and-braces: there must be no still-loading <img> left either.
   await page.waitForFunction(() => {
     const imgs = [...document.querySelectorAll('img')];
-    return imgs.length > 0 && imgs.every((i) => i.complete && i.naturalWidth > 0);
+    return imgs.every((i) => i.complete && i.naturalWidth > 0);
   });
   const buf = await page.screenshot({ fullPage: true });
   writeFileSync(join(OUT, 'gallery.png'), buf);

@@ -140,9 +140,34 @@ function uniform(id, away = false) {
 }
 
 /**
- * Domed football helmet with a facemask bar. Reads as a helmet (not a horned
- * cap) at 1x: rounded crown, straight ear flaps, and a horizontal facemask bar
- * with vertical struts on the front view / a forward bar on the side view.
+ * Facemask grill colour per character. Chosen to contrast BOTH the face skin
+ * it sits over and the helmet shell/ear-flaps it attaches to, so the mask reads
+ * as a mask instead of vanishing into a same-toned skin (e.g. Reapers' bone-
+ * white face against a grey mask).
+ */
+export function maskColor(id) {
+  switch (id) {
+    case 'boneyard_reapers':
+      return M.VOID_BLACK; // black grill over the bone-white skull face
+    case 'rotting_deadskins':
+      return M.BONE_WHITE; // bone bar over olive skin
+    case 'transylvania_nightstalkers':
+      return F.VAMPIRE_GOLD; // gilded grill over parchment skin + black shell
+    case 'salem_bayou_ghouls':
+      return M.BONE_WHITE; // pale bar over swamp-green skin
+    case 'necro_ref':
+      return M.VOID_BLACK;
+    case 'demon_ref':
+      return M.BONE_WHITE;
+    default:
+      return M.TOMBSTONE_GRAY;
+  }
+}
+
+/**
+ * Domed football helmet. Shell + crown accents only: the facemask grill and
+ * teeth are drawn separately (see facemask()) so they can be layered ON TOP of
+ * the face skin, not hidden under it.
  */
 function helmet(b, cx, hy, st, v, id) {
   const side = v.kind === 'side';
@@ -155,23 +180,11 @@ function helmet(b, cx, hy, st, v, id) {
   // ear flaps
   b.rect(x0, hy + 6, 2, 3, dark(st.pad));
   b.rect(x0 + w - 2, hy + 6, 2, 3, dark(st.pad));
-  // facemask: horizontal bar + vertical struts (front) / forward bar (side)
-  if (side) {
-    const dir = v.s >= 0 ? 1 : -1;
-    const fx = dir === 1 ? x0 + w : x0 - 2;
-    b.rect(fx, hy + 5, 2, 3, M.TOMBSTONE_GRAY);
-    b.rect(fx + (dir === 1 ? 1 : -1), hy + 5, 1, 3, M.TOMBSTONE_GRAY);
-  } else {
-    b.rect(x0 + 1, hy + 7, w - 2, 1, M.TOMBSTONE_GRAY);
-    b.rect(cx - 1, hy + 8, 1, 2, M.TOMBSTONE_GRAY);
-    b.rect(cx + 1, hy + 8, 1, 2, M.TOMBSTONE_GRAY);
-  }
-  // faction helmet accents
+  // faction helmet accents (crown / forehead, never the face opening)
   if (id === 'boneyard_reapers') {
-    // skull sockets + teeth show through the face opening
+    // skull sockets show through the face opening's upper rim
     b.rect(cx - 3, hy + 4, 2, 2, M.VOID_BLACK);
     b.rect(cx + 1, hy + 4, 2, 2, M.VOID_BLACK);
-    b.rect(cx - 2, hy + 8, 4, 1, M.BONE_WHITE);
   }
   if (id === 'rotting_deadskins') {
     // exposed brain: a lighter patch on the crown
@@ -181,13 +194,47 @@ function helmet(b, cx, hy, st, v, id) {
     // sleek visor band
     b.rect(x0 + 1, hy + 4, w - 2, 1, F.VAMPIRE_GOLD);
   }
-  if (id === 'salem_bayou_ghouls') {
-    // crooked witch-iron facemask: offset vertical struts
-    b.rect(cx - 2, hy + 8, 1, 2, M.TOMBSTONE_GRAY);
-    b.rect(cx + 2, hy + 8, 1, 2, M.TOMBSTONE_GRAY);
-  }
   if (id === 'necro_ref' || id === 'demon_ref') {
     b.rect(x0 + 1, hy + 4, w - 2, 1, M.VOID_BLACK); // ref cap band
+  }
+}
+
+/**
+ * Facemask grill + faction mouth accents, drawn AFTER the face/skin so the bar
+ * is never overwritten by the face rectangle. Front view: horizontal bar with
+ * visible side attachments onto the ear flaps plus vertical centre struts; a
+ * couple of factions get offset/crooked struts. Side view: a forward bar.
+ */
+function facemask(b, cx, hy, v, id) {
+  const mask = maskColor(id);
+  const side = v.kind === 'side';
+  const w = side ? 11 : 12;
+  const x0 = cx - Math.floor(w / 2);
+  if (side) {
+    const dir = v.s >= 0 ? 1 : -1;
+    const fx = dir === 1 ? x0 + w : x0 - 2;
+    b.rect(fx, hy + 5, 2, 3, mask);
+    b.rect(fx + (dir === 1 ? 1 : -1), hy + 5, 1, 3, mask);
+    return;
+  }
+  // horizontal bar spanning the face opening
+  b.rect(x0 + 1, hy + 7, w - 2, 1, mask);
+  // side attachments: a vertical connector at each end of the bar, down onto
+  // the ear flap, so the bar visibly joins the helmet instead of floating.
+  b.rect(x0, hy + 7, 1, 3, mask);
+  b.rect(x0 + w - 1, hy + 7, 1, 3, mask);
+  // centre vertical struts
+  b.rect(cx - 1, hy + 8, 1, 2, mask);
+  b.rect(cx + 1, hy + 8, 1, 2, mask);
+  // faction mouth accents
+  if (id === 'boneyard_reapers') {
+    // jaw teeth show below the mask bar
+    b.rect(cx - 2, hy + 9, 4, 1, M.BONE_WHITE);
+  }
+  if (id === 'salem_bayou_ghouls') {
+    // crooked witch-iron facemask: offset vertical struts
+    b.rect(cx - 2, hy + 8, 1, 2, mask);
+    b.rect(cx + 2, hy + 8, 1, 2, mask);
   }
 }
 
@@ -286,10 +333,12 @@ function drawUpright(b, id, p) {
   // ---- head + helmet ----
   const hy = 8 + bob;
   helmet(b, cx + up, hy, st, v, id);
-  // face (skin) below the helmet shell, above the facemask
   if (!back) {
+    // face (skin) painted FIRST, then the facemask grill on top, so the bar and
+    // teeth are never overwritten by the face rectangle (paint-order fix).
     b.rect(cx + up - 4, hy + 6, 8, 3, st.skin);
-    // eyes
+    facemask(b, cx + up, hy, v, id);
+    // eyes last, so they stay visible over the grill bar
     const ey = hy + 7;
     if (v.kind === 'front') {
       b.rect(cx - 3 + v.s * 2, ey, 2, 2, st.eye);
@@ -365,7 +414,7 @@ function drawHoriz(b, id, { x = 6, y = 28, dirX = 1, tilt = 0, smear = 0, away =
 const TOMB = M.TOMBSTONE_GRAY;
 
 // ---- animation poses ---------------------------------------------------------------------------
-const DIRS = [
+export const DIRS = [
   { kind: 'front', s: 0 },
   { kind: 'front', s: 1 },
   { kind: 'side', s: 1 },
@@ -378,19 +427,20 @@ const DIRS = [
 
 // A real 6-frame run gait. Each entry is a full pose over the stride cycle:
 // contact / down / passing / up / passing / contact (mirrored). leg x-offsets
-// give a 4+px stride, leg lift gives the vertical phase, and arms swing opposite
-// the legs. `dir` is +1 (running right/E) or -1 (left/W) for side views.
-const RUN_GAIT = [
-  //               lx   ll   rx   rl   al(arm)      ar(arm)
-  { lx: 2, ll: 0, rx: -3, rl: 0, al: [2, 7], ar: [-3, 9] }, // contact (both down)
-  { lx: 4, ll: 2, rx: -5, rl: 0, al: [3, 6], ar: [-4, 8] }, // down (weight sinks)
-  { lx: 0, ll: 3, rx: 0, rl: 3, al: [0, 7], ar: [0, 9] }, // passing (legs together)
-  { lx: -3, ll: 0, rx: 2, rl: 4, al: [-3, 9], ar: [2, 7] }, // up (apex, rear leg back)
-  { lx: -5, ll: 0, rx: 4, rl: 2, al: [-4, 8], ar: [3, 6] }, // passing (mirrored)
-  { lx: -3, ll: 0, rx: 2, rl: 0, al: [-3, 9], ar: [2, 7] }, // contact (mirrored)
+// give a 4+px stride, leg lift gives the vertical phase, and arms swing OPPOSITE
+// the legs (contralateral: left arm forward when the right leg is forward).
+// `dir` is +1 (running right/E) or -1 (left/W) for side views.
+export const RUN_GAIT = [
+  //               lx   ll   rx   rl   al(arm)       ar(arm)
+  { lx: 2, ll: 0, rx: -3, rl: 0, al: [-5, 5], ar: [4, 11] }, // contact (left leg planted, full arm reach)
+  { lx: 4, ll: 2, rx: -5, rl: 0, al: [-6, 4], ar: [5, 10] }, // down (right arm swings high)
+  { lx: 0, ll: 3, rx: 0, rl: 3, al: [0, 6], ar: [0, 12] }, // passing (legs together, arms vertical)
+  { lx: -3, ll: 0, rx: 2, rl: 4, al: [4, 11], ar: [-5, 5] }, // up (right leg up, left arm reach)
+  { lx: -5, ll: 0, rx: 4, rl: 2, al: [5, 10], ar: [-6, 4] }, // passing (mirrored)
+  { lx: -3, ll: 0, rx: 2, rl: 0, al: [4, 11], ar: [-5, 5] }, // contact (mirrored)
 ];
 
-function drawFrame(id, anim, f, dirIdx = 0, away = false) {
+export function drawFrame(id, anim, f, dirIdx = 0, away = false) {
   const b = new Buf(48, 48);
   const bounce = [0, 1, 0, 1][f % 4];
   const av = { away };
@@ -406,7 +456,7 @@ function drawFrame(id, anim, f, dirIdx = 0, away = false) {
       // and back views run toward the torso after redirection.
       const dir = side ? (v.s >= 0 ? 1 : -1) : v.s || 0;
       const lean = side ? dir * 2 : 0; // 2px torso lean in the run direction
-      const bob = [1, 0, 0, 2, 0, 1][f % 6]; // vertical bob over the stride
+      const bob = [2, 0, 1, 3, 1, 2][f % 6]; // vertical bob over the stride
       drawUpright(b, id, {
         view: v,
         bob,
@@ -417,8 +467,8 @@ function drawFrame(id, anim, f, dirIdx = 0, away = false) {
         rx: side ? g.rx * dir : 0,
         ll: side ? g.ll : g.ll,
         rl: side ? g.rl : g.rl,
-        al: side ? [2 * dir, 8 - (g.al[1] - 7)] : g.al,
-        ar: side ? [-2 * dir, 8 - (g.ar[1] - 7)] : g.ar,
+        al: side ? [g.al[0] * dir, g.al[1]] : g.al,
+        ar: side ? [g.ar[0] * dir, g.ar[1]] : g.ar,
         ...av,
       });
       // dust puffs under the planted foot on contact frames
@@ -1035,4 +1085,5 @@ async function main() {
   );
   console.log('generated assets in public/assets');
 }
-await main();
+
+if (import.meta.url === `file://${process.argv[1]}`) await main();
