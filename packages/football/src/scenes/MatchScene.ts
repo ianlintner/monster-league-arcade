@@ -15,18 +15,21 @@ import {
   projectToScreen,
   toPhaserColor,
 } from '@monster-league/shared-core';
-import { GameSession } from '../sim/index';
+import { GameSession, type Slot } from '../sim/index';
 import { buildLivePlayInput, projectActor } from '../field/fieldMapper';
 import { LivePlay, type LiveActorState, type LivePlayResult } from '../field/LivePlay';
+import { HazardManager } from '../field/HazardManager';
+import { resolvePassAttempt } from '../field/PlayOrchestrator';
+import type { HazardHit } from '../sim/GameSession';
 
 export const CANVAS_WIDTH = 640;
 export const CANVAS_HEIGHT = 360;
 
-/** Three human-selectable run plays (A/B/C), each with its own formation. */
-const RUN_PLAYS: ReadonlyArray<{ id: string; label: string }> = [
-  { id: 'INSIDE_GORE_RUN', label: 'Inside Gore Run' },
-  { id: 'COFFIN_SWEEP', label: 'Coffin Sweep' },
-  { id: 'OPTION_PITCH', label: 'Option Pitch' },
+/** Three human-selectable plays (A/B/C) — two runs and one pass. */
+const PLAY_CATALOG: ReadonlyArray<{ id: string; label: string; kind: 'RUN' | 'PASS' }> = [
+  { id: 'INSIDE_GORE_RUN', label: 'Inside Gore Run', kind: 'RUN' },
+  { id: 'COFFIN_SWEEP', label: 'Coffin Sweep', kind: 'RUN' },
+  { id: 'QUICK_SLANTS', label: 'Quick Slants (Pass)', kind: 'PASS' },
 ];
 const DEFAULT_DEFENSE = 'BONE_CRUSH_BASE';
 
@@ -82,6 +85,15 @@ export class MatchScene extends Phaser.Scene {
   private actorsLayer!: Phaser.GameObjects.Container;
   private readyText!: Phaser.GameObjects.Text;
 
+  /** Hazard terrain for the arena, evaluated every live tick. */
+  private hazardManager!: HazardManager;
+  /** Hazard hits accumulated over the current live down, committed at whistle. */
+  private pendingHazardHits: HazardHit[] = [];
+  /** Whether the current live play is a pass (QB drops back, A/B/C = receivers). */
+  private isPassPlay = false;
+  /** Hold time for the current pass (ms) → lob vs bullet throw style. */
+  private passHoldMs = 0;
+
   private pressed = new Set<number>();
 
   constructor() {
@@ -103,6 +115,9 @@ export class MatchScene extends Phaser.Scene {
     });
     this.session.coinToss('home');
     this.session.kickoff({ touchback: true });
+
+    // Hazard terrain derived from the home faction's arena; graveyard for now.
+    this.hazardManager = new HazardManager('cursed-graveyard', 1993);
 
     this.fieldGfx = this.add.graphics();
     this.drawField(this.fieldGfx as unknown as DrawSurface);
@@ -203,31 +218,25 @@ export class MatchScene extends Phaser.Scene {
 
   private confirmPlay(index: number): void {
     this.selectedPlayIndex = index;
-    this.session.selectPlays(RUN_PLAYS[index]!.id, DEFAULT_DEFENSE);
-    // Build the live-play state now so the formation renders during pre-snap;
-    // it is only *advanced* once the ball is snapped.
-    this.buildLivePlay();
+    this.session.selectPlays(PLAY_CATALOG[index]!.id, DEFAULT_DEFENSE);
     this.mode = 'PRE_SNAP';
   }
 
-  private buildLivePlay(): void {
-    const input = buildLivePlayInput(
-      this.session,
-      RUN_PLAYS[this.selectedPlayIndex]!.id,
-      DEFAULT_DEFENSE,
-      0x9e3779b9,
-    );
+  private updatePreSnap(): void {
+    if (this.wasPressed(KeyC)) this.beginLivePlay();
+  }
+
+  private beginLivePlay(): void {
+    const play = PLAY_CATALOG[this.selectedPlayIndex]!;
+    this.isPassPlay = play.kind === 'PASS';
+    this.passHoldMs = 0;
+    this.pendingHazardHits = [];
+    const input = buildLivePlayInput(this.session, play.id, DEFAULT_DEFENSE, 0x9e3779b9);
     this.live = new LivePlay(input);
     this.snapLos = this.session.los;
     this.liveResult = null;
     this.highlightDefender = -1;
     this.simAccumulator = 0;
-  }
-
-  private updatePreSnap(): void {
-    if (this.wasPressed(KeyC)) {
-      this.mode = 'LIVE';
-    }
   }
 
   // ------------------------------------------------------------- live loop
@@ -236,18 +245,36 @@ export class MatchScene extends Phaser.Scene {
     const live = this.live;
     if (!live) return;
 
-    if (this.wasPressed(KeyB)) {
+    if (this.wasPressed(KeyB) && !this.isPassPlay) {
       // Defense: cycle which defender is the highlighted "user" pursuer.
       this.highlightDefender = (this.highlightDefender + 1) % 7;
     }
 
-    // Feed the carrier command, then advance one 60 Hz step per 1/60 s of real
-    // elapsed time (catch-up capped at 4 steps so a stalled frame doesn't burst).
+    // Pass plays: A/B/C throw to the matching receiver. Hold length sets style.
+    if (this.isPassPlay) {
+      const throwTarget = this.wasPressed(KeyA)
+        ? 'A'
+        : this.wasPressed(KeyB)
+          ? 'B'
+          : this.wasPressed(KeyC)
+            ? 'C'
+            : null;
+      if (throwTarget) {
+        this.commitPass(throwTarget);
+        return;
+      }
+      // Track button hold for lob vs bullet: A (lob, tap) vs C (bullet, hold).
+      if (this.input.keyboard!.addKey(KeyA).isDown) this.passHoldMs += 16;
+      else this.passHoldMs = 0;
+    }
+
+    // Feed the carrier command, then advance a full 60 Hz frame. Turbo (C) and
+    // dive (A) are edge-detected so they re-fire on each press; steering is held.
     const turboHeld = this.input.keyboard!.addKey(KeyC).isDown;
     live.command({
       steerX: this.steer.x,
       steerY: this.steer.y,
-      dive: this.wasPressed(KeyA),
+      dive: this.wasPressed(KeyA) && !this.isPassPlay,
       turbo: turboHeld,
     });
 
@@ -263,10 +290,59 @@ export class MatchScene extends Phaser.Scene {
     }
     if (steps === maxSteps) this.simAccumulator = 0; // drop excess, stay near real time
 
+    // Hazard terrain: evaluate the carrier's current cell; accumulate hits.
+    this.hazardManager.tick(1 / 60);
+    const carrier = live.snapshot().actors.find((a) => a.id === live.carrier.id);
+    if (carrier) {
+      const influence = this.hazardManager.evaluate(
+        carrier.x,
+        carrier.y,
+        { team: carrier.team, side: carrier.side, slot: carrier.slot as Slot },
+        this.wasPressed(KeyA) && this.isPassPlay === false,
+        1 / 60,
+      );
+      for (const hit of influence.hits) this.pendingHazardHits.push(hit);
+    }
+
     if (live.snapshot().outcome.kind === 'WHISTLE') {
       this.liveResult = live.result();
       this.commitOutcome();
     }
+  }
+
+  /**
+   * Resolve a pass throw to a receiver A/B/C. The target lead point is the
+   * receiver's live position; defenders are the defensive actors. Commit via
+   * `resolvePassAttempt` → `snap({ target, force })`.
+   */
+  private commitPass(target: 'A' | 'B' | 'C'): void {
+    const live = this.live;
+    if (!live) return;
+    const qb = live.snapshot().actors.find((a) => a.id === live.carrier.id);
+    const defs = live.snapshot().actors.filter((a) => a.side === 'DEFENSE');
+    // Receiver = the target's slot live actor (WR/TE for A, RB2/WR for B, RB1 for C).
+    const slotFor = { A: 'WR/TE', B: 'RB2/WR', C: 'RB1' } as const;
+    const receiverId = `${this.session.possession}-${slotFor[target]}`;
+    const receiver = live.snapshot().actors.find((a) => a.id === receiverId);
+    if (!qb || !receiver) return;
+
+    const snap = resolvePassAttempt(
+      {
+        fromX: qb.x,
+        fromY: qb.y,
+        toX: receiver.x,
+        toY: receiver.y,
+        holdMs: this.passHoldMs,
+        defenders: defs.map((d) => ({ id: d.id, x: d.x, y: d.y })),
+      },
+      target,
+    );
+    // Fold any accumulated hazard hits into the same snap.
+    if (this.pendingHazardHits.length > 0) snap.hazards = [...this.pendingHazardHits];
+    const res = this.session.snap(snap);
+    this.bannerText = res.banner;
+    this.bannerTimer = 2.2;
+    this.mode = 'BANNER';
   }
 
   /** Commit the live-play result into the session and show the play-over banner. */
@@ -277,7 +353,16 @@ export class MatchScene extends Phaser.Scene {
     // out-of-bounds whistle through so the session stops the clock and skips
     // tackle damage / contact fumbles on an untouched sideline exit.
     const yards = r.finalX;
-    const res = this.session.snap({ force: { yards, outOfBounds: r.outOfBounds } });
+    const snap: {
+      force: { yards: number; outOfBounds?: boolean; tackleDamage?: number; fumble?: boolean };
+      hazards?: HazardHit[];
+    } = {
+      force: { yards, outOfBounds: r.outOfBounds },
+    };
+    // Tackle damage: the tackler's rating naively scales a base hit.
+    if (r.tackler) snap.force.tackleDamage = 6 + Math.floor(8 * 0.5);
+    if (this.pendingHazardHits.length > 0) snap.hazards = [...this.pendingHazardHits];
+    const res = this.session.snap(snap as Parameters<GameSession['snap']>[0]);
     this.bannerText = res.banner;
     this.bannerTimer = 2.2;
     this.mode = 'BANNER';
@@ -543,7 +628,7 @@ export class MatchScene extends Phaser.Scene {
     let prompt = '';
     switch (this.mode) {
       case 'PICK':
-        prompt = `Call the play — [A] ${RUN_PLAYS[0]!.label} · [B] ${RUN_PLAYS[1]!.label} · [C] ${RUN_PLAYS[2]!.label}`;
+        prompt = `Call the play — [A] ${PLAY_CATALOG[0]!.label} · [B] ${PLAY_CATALOG[1]!.label} · [C] ${PLAY_CATALOG[2]!.label}`;
         break;
       case 'PRE_SNAP':
         prompt = `Pre-Snap: [C] Snaps the ball · ${down}`;

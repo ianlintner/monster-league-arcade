@@ -162,6 +162,7 @@ export class LivePlay {
   private outcome: LivePlayOutcome = { kind: 'RUNNING' };
   private tackler: string | null = null;
   private waypointIndex = 0;
+  private routeIndices = new Map<string, number>();
   private hitStopRemaining = 0;
   /** Zeroed steer vector to blend input with the scripted route. */
   private steerX = 0;
@@ -350,6 +351,33 @@ export class LivePlay {
     return { x: dx / m, y: dy / m };
   }
 
+  /**
+   * Heading a non-carrier actor takes to the next point on its scripted route
+   * (receivers running routes). Per-actor waypoint progress is tracked so each
+   * receiver advances independently.
+   */
+  private routeHeading(actor: LiveActorState, route: LiveWaypoint[]): { x: number; y: number } {
+    let idx = this.routeIndices.get(actor.id) ?? 0;
+    while (idx < route.length - 1) {
+      const wp = route[idx]!;
+      const dx = wp.x - actor.x;
+      const dy = wp.y - actor.y;
+      const m = Math.hypot(dx, dy);
+      if (m < 0.5) {
+        idx += 1;
+        this.routeIndices.set(actor.id, idx);
+        continue;
+      }
+      return { x: dx / m, y: dy / m };
+    }
+    const wp = route[route.length - 1] ?? route[0];
+    if (!wp) return { x: 1, y: 0 };
+    const dx = wp.x - actor.x;
+    const dy = wp.y - actor.y;
+    const m = Math.hypot(dx, dy) || 1;
+    return { x: dx / m, y: dy / m };
+  }
+
   private advanceAI(): void {
     const carrier = this.carrier;
     // Blockers: offensive non-carriers that can engage a defender in contact.
@@ -358,7 +386,7 @@ export class LivePlay {
       if (a.downed || a === carrier) continue;
       const spec = this.input.actors.find((s) => s.id === a.id)!;
 
-      // A defender in contact with a blocker is engaged: the blocker stalls the
+// A defender in contact with a blocker is engaged: the blocker stalls the
       // pursuit so the offensive line provides real protection on run plays.
       a.engaged = false;
       if (a.side === 'DEFENSE') {
@@ -371,10 +399,13 @@ export class LivePlay {
         }
       }
 
-      // Defense pursues the carrier; offense (non-carrier) drifts forward to block.
+      // Non-carrier offense follows its scripted route (receivers run routes);
+      // defense pursues the carrier; blockers with no route drift downfield.
+      const route = this.input.routes?.[a.id];
+      const routePoint = route ? this.routeHeading(a, route) : null;
       const engagedDamp = a.engaged ? 0.1 : 1; // engaged defenders crawl, not run
-      const targetX = a.side === 'DEFENSE' ? carrier.x : a.x + 2;
-      const targetY = a.side === 'DEFENSE' ? carrier.y : a.y;
+      const targetX = a.side === 'DEFENSE' ? carrier.x : routePoint ? routePoint.x : a.x + 2;
+      const targetY = a.side === 'DEFENSE' ? carrier.y : routePoint ? routePoint.y : a.y;
       const dx = targetX - a.x;
       const dy = targetY - a.y;
       const m = Math.hypot(dx, dy) || 1;
