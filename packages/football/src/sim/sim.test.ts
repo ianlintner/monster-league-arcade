@@ -147,6 +147,19 @@ describe('downs, clock & scoring', () => {
     expect(g.possession).toBe('away');
     expect([g.down, g.los]).toEqual([1, 71]);
   });
+  it('out-of-bounds run stops the clock and never fumbles', () => {
+    const g = start();
+    setup(g, 'INSIDE_GORE_RUN');
+    // Force a fumble: without the out-of-bounds guard this would resolve a
+    // FUMBLE LOST and flip possession. The guard must suppress it.
+    const r = g.snap({ force: { yards: 5, fumble: true, tackleDamage: 1, outOfBounds: true } });
+    expect(r.outOfBounds).toBe(true);
+    expect(g.clockRunning).toBe(false);
+    expect(r.fumble).toBe(false);
+    expect(r.turnover).toBe(false);
+    expect(r.damage).toHaveLength(0);
+    expect(g.possession).toBe('home');
+  });
   it('touchdown, extra point kick and 2-pt conversion', () => {
     const g = start();
     g.los = 95;
