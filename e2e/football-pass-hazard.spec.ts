@@ -55,14 +55,25 @@ test('passing windows open, throw completes, no console errors', async ({ page }
   expect((await mlf(page)).mode).toBe('LIVE');
   expect((await mlf(page)).isPassPlay).toBe(true);
 
-  // Open the receiving windows; the [A][B][C] badges must be on.
-  await page.evaluate(() => (window as unknown as { __mlf?: MlfHandle }).__mlf!.openWindows());
-  expect((await mlf(page)).windowsOpen).toBe(true);
+  // Open the receiving windows with a *real* C key press. The same press must
+  // open the windows WITHOUT also throwing to receiver C (the player then gets to
+  // choose A or B) — regression for the open-vs-throw coupling in the same frame.
+  await page.keyboard.down('KeyC');
+  await page.waitForTimeout(100);
+  await page.keyboard.up('KeyC');
+  await expect.poll(async () => (await mlf(page)).windowsOpen, { timeout: 5_000 }).toBe(true);
   await page.waitForTimeout(200);
   await page.screenshot({ path: 'docs/screenshots/football-passing-windows.png' });
 
-  // Throw to the A receiver and wait for the ball to land + banner.
-  await page.evaluate(() => (window as unknown as { __mlf?: MlfHandle }).__mlf!.throwTo('A'));
+  // After a single C press, mode is still LIVE (a throw to C would commit a pass
+  // and advance to BANNER). Confirm no throw fired from the opening press.
+  expect((await mlf(page)).mode).toBe('LIVE');
+  expect((await mlf(page)).windowsOpen).toBe(true);
+
+  // Throw to the A receiver with a real key press and wait for the ball to land.
+  await page.keyboard.down('KeyA');
+  await page.waitForTimeout(220); // hold > 180 ms → bullet; lob under that
+  await page.keyboard.up('KeyA');
   await expect.poll(async () => (await mlf(page)).mode, { timeout: 10_000 }).toBe('BANNER');
   await page.screenshot({ path: 'docs/screenshots/football-pass.png' });
 

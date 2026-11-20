@@ -145,6 +145,12 @@ export class MatchScene extends Phaser.Scene {
   private heldThrowKey: 'A' | 'B' | null = null;
   /** Whether the receiving windows are open (C toggles them behind the LOS). */
   private windowsOpen = false;
+  /** True from the C press that opened the windows until a *fresh* C keydown, so
+   *  that very same press never doubles as a throw to receiver C (the player must be
+   *  able to choose A or B, or re-press C deliberately, after opening). */
+  private windowOpenPressConsumed = false;
+  /** Previous frame's C `isDown`, for up→down edge detection in `sampleInput`. */
+  private prevCHeld = false;
   /** Deterministic check used to trigger the first hazard for the e2e path. */
   private hazardArmedForDemo = true;
   /** Accumulates render time toward fixed 60 Hz sim steps (real-time pacing). */
@@ -270,6 +276,14 @@ export class MatchScene extends Phaser.Scene {
     for (const code of [KeyA, KeyB, KeyC] as const) {
       if (Phaser.Input.Keyboard.JustDown(kb.addKey(code))) this.pressed.add(code);
     }
+
+    // A *fresh* C keydown (up→down transition) re-arms the pass window consume so a
+    // genuinely new C press can throw to receiver C. Clearing on release instead
+    // (as `isDown` flips false) lets the opening press still double-fire across the
+    // leftover latched `pressed` state; edge-detect here so the latch holds exactly
+    // one press.
+    if (!this.prevCHeld && kb.addKey(KeyC).isDown) this.windowOpenPressConsumed = false;
+    this.prevCHeld = kb.addKey(KeyC).isDown;
   }
 
   private wasPressed(code: number): boolean {
@@ -324,6 +338,7 @@ export class MatchScene extends Phaser.Scene {
     this.passHoldMs = 0;
     this.heldThrowKey = null;
     this.windowsOpen = false;
+    this.windowOpenPressConsumed = false;
     this.ballFlight = null;
     this.damagePopups = [];
     this.casualties = [];
@@ -356,7 +371,7 @@ export class MatchScene extends Phaser.Scene {
   private updateLive(dt: number): void {
     // Ball-in-flight animation runs to completion before further input lands.
     if (this.ballFlight) {
-      this.advanceBallFlight();
+      this.advanceBallFlight(dt);
       return;
     }
 
@@ -378,18 +393,30 @@ export class MatchScene extends Phaser.Scene {
     // Pass plays: C opens the receiving windows (scope: behind LOS); A/B/C throw
     // to the matching receiver while the windows are open. Hold length sets style.
     if (this.isPassPlay) {
-      if (this.wasPressed(KeyC)) {
+      const kb = this.input.keyboard!;
+      const cHeld = kb.addKey(KeyC).isDown;
+
+      // The C press that opens the windows must NOT also throw to receiver C in
+      // the same press: it is consumed once. Only a *fresh* subsequent C press (its
+      // own keydown) — while windows are already open — is treated as a throw to C.
+      // When windows are still closed, the same C press only opens them.
+      if (this.wasPressed(KeyC) && !this.windowsOpen && !this.windowOpenPressConsumed) {
         // Windows may only open while the QB is behind (or on) the line of
         // scrimmage. Once the QB scrambles downfield the option is unavailable.
         const qb = live.snapshot().actors.find((a) => a.id === live.carrier.id);
         if (qb && qb.x <= 0) {
-          this.windowsOpen = !this.windowsOpen;
+          this.windowsOpen = true;
           this.passHoldMs = 0;
+          // Consume this C press so it cannot double as a throw, until a genuinely
+          // new C keydown arrives (cleared in `sampleInput` on the next edge).
+          this.windowOpenPressConsumed = true;
         }
       }
+      // A fresh C keydown re-arms the throw-to-C path (and window re-open); cleared
+      // per-input-edge in `sampleInput` so holding C through several render frames
+      // never re-opens the windows and never re-fires the opening consume.
 
       if (this.windowsOpen) {
-        const kb = this.input.keyboard!;
         // A/B throw on *release*, so a held receiver button accumulates hold time
         // and only launches (lob vs bullet by duration) when the player lets go.
         if (kb.addKey(KeyA).isDown) {
@@ -401,15 +428,19 @@ export class MatchScene extends Phaser.Scene {
         const bUp = Phaser.Input.Keyboard.JustUp(kb.addKey(KeyB));
         const released =
           this.heldThrowKey === 'A' && aUp ? 'A' : this.heldThrowKey === 'B' && bUp ? 'B' : null;
-        // C both opens windows and (held) throws to C; a tap toggles, so require a
-        // hold to throw to C and commit on its release rather than on the toggle.
-        const cHeld = kb.addKey(KeyC).isDown;
+        // C throws to receiver C, but only on a deliberate press AFTER the window-
+        // opening press (so opening the windows never instantly picks C).
         const cUp = Phaser.Input.Keyboard.JustUp(kb.addKey(KeyC));
-        const cTarget = cHeld || cUp ? 'C' : null;
+        const cTarget = !this.windowOpenPressConsumed && cUp ? 'C' : null;
 
-        // Accumulate hold time while any throw key is held; reset on release/none.
-        if (this.heldThrowKey || cHeld) this.passHoldMs += 16;
-        else if (!released && !cTarget) this.passHoldMs = 0;
+        // Accumulate hold time by *elapsed* time (seconds → ms), not a fixed 16 ms
+        // per rendered frame: otherwise the same physical hold produces a lob or a
+        // bullet depending on refresh rate and shorter air time on faster displays.
+        if (this.heldThrowKey || (cHeld && !this.windowOpenPressConsumed)) {
+          this.passHoldMs += dt * 1000;
+        } else if (!released && !cTarget) {
+          this.passHoldMs = 0;
+        }
 
         const target = released ?? cTarget;
         if (target) {
@@ -558,11 +589,13 @@ export class MatchScene extends Phaser.Scene {
     this.collectDamageAndCasualties();
   }
 
-  /** Advance the airborne ball each frame; resolve on landing. */
-  private advanceBallFlight(): void {
+  /** Advance the airborne ball by elapsed real time; resolve on landing. */
+  private advanceBallFlight(dt: number): void {
     const b = this.ballFlight;
     if (!b) return;
-    b.t += 1 / 60;
+    // Advance by the elapsed frame time, not a fixed 1/60 s per rendered frame:
+    // otherwise the ball lands sooner on faster displays (frame-rate coupling).
+    b.t += dt;
     if (b.t >= b.dur) {
       this.ballFlight = null;
       b.onLand();
@@ -770,16 +803,19 @@ export class MatchScene extends Phaser.Scene {
     // Pass plays that end with the QB still behind the LOS must be committed as a
     // sack (tackled) or an explicit incomplete (scrambled out of bounds) rather than
     // letting `rawPlay()` roll a fresh pass outcome that turns a visible tackle into
-    // a completion/interception and applies the tackle to a receiver.
+    // a completion/interception and applies the tackle to a receiver. Only when the
+    // QB is actually still behind (or on) the line of scrimmage is it a sack/erased
+    // gain: a QB who scrambled *past* the LOS and is then tackled or steps out of
+    // bounds keeps the positive gain (the original yardage, not a clamped zero).
     if (this.isPassPlay && r.outcome.kind === 'WHISTLE') {
-      const penalizedLoss = Math.min(0, yards);
-      if (r.outcome.reason === 'TACKLE' && penalizedLoss <= 0) {
+      const behindLos = yards <= 0;
+      if (r.outcome.reason === 'TACKLE' && behindLos) {
         snap.force.sacked = true;
-        snap.force.yards = penalizedLoss;
+        snap.force.yards = yards;
       }
       // A scrambled QB who steps out of bounds behind the LOS is an incomplete pass,
-      // not a new snap with random air yardage.
-      if (r.outcome.reason === 'OUT_OF_BOUNDS' && penalizedLoss <= 0) {
+      // not a new snap with random air yardage. Past the LOS the gain is preserved.
+      if (r.outcome.reason === 'OUT_OF_BOUNDS' && behindLos) {
         snap.force.sacked = true;
         snap.force.yards = 0;
       }
@@ -955,12 +991,17 @@ export class MatchScene extends Phaser.Scene {
     g.lineBetween(base.x - w, base.y - h * 0.55, base.x + w, base.y - h * 0.55);
   }
 
-  /** Redraw the hazard layer only when a hazard's armed state changed (mines
-   *  detonate/clear, geysers re-arm) so the player never sees stale terrain. */
+  /** Redraw the hazard layer when armed state *or* a telegraphed geyser's
+   *  countdown changes, so the telegraph fill animates as it approaches eruption
+   *  instead of freezing on the arm-state transition alone. */
   private redrawHazardsIfDirty(): void {
     const key = this.hazardManager
       .snapshot()
-      .map((h) => `${h.id}:${h.armed}`)
+      .map((h) =>
+        h.kind === 'LAVA_GEYSER' && !h.armed
+          ? `${h.id}:telegraph:${Math.round(h.telegraphSeconds * 10)}`
+          : `${h.id}:${h.armed}`,
+      )
       .join('|');
     if (key === this.hazardStateKey) return;
     this.hazardStateKey = key;
@@ -972,7 +1013,12 @@ export class MatchScene extends Phaser.Scene {
     // Hazard coords are absolute field-of-play (x∈[0,100], y lat. ±26.66); the
     // 10-yard end zone offset maps them into projection space.
     for (const h of this.hazardManager.snapshot()) {
-      if (!h.armed) continue;
+      // Lava geysers must be visible during their warning interval (armed=false,
+      // telegraphSeconds > 0) so the player sees the telegraph *before* it erupts —
+      // not only after it is already dangerous. Every other unarmed hazard (a
+      // spent mine, dive-cleared sludge) is legitimately invisible.
+      const telegraphed = h.kind === 'LAVA_GEYSER' && !h.armed && h.telegraphSeconds > 0;
+      if (!h.armed && !telegraphed) continue;
       const s = projectToScreen(10 + h.x, 26.5 + h.y);
       switch (h.kind) {
         case 'TOMBSTONE':
@@ -994,8 +1040,24 @@ export class MatchScene extends Phaser.Scene {
           g.fillRect(s.x - 2 * s.scale, s.y - 3 * s.scale, 4 * s.scale, 2 * s.scale);
           break;
         case 'LAVA_GEYSER':
-          g.fillStyle(toPhaserColor('VAMPIRE_CRIMSON'), h.telegraphSeconds > 0 ? 0.4 : 0.9);
-          g.fillEllipse(s.x, s.y, 8 * s.scale, 8 * s.scale);
+          // Telegraph: a faint rim + countdown-filling core the player can read
+          // before the eruption. Armed: the full crimson vent.
+          if (telegraphed) {
+            // TelegraphSeconds counts down 1..0; a fuller ring means closer to boom.
+            const frac = 1 - Math.max(0, Math.min(1, h.telegraphSeconds));
+            g.lineStyle(1, toPhaserColor('HELLFIRE_AMBER'), 0.7);
+            g.strokeEllipse(s.x, s.y, 8 * s.scale, 8 * s.scale);
+            g.fillStyle(toPhaserColor('VAMPIRE_CRIMSON'), 0.2 + 0.25 * frac);
+            g.fillEllipse(
+              s.x,
+              s.y,
+              5 * s.scale * (0.4 + 0.6 * frac),
+              5 * s.scale * (0.4 + 0.6 * frac),
+            );
+          } else {
+            g.fillStyle(toPhaserColor('VAMPIRE_CRIMSON'), 0.9);
+            g.fillEllipse(s.x, s.y, 8 * s.scale, 8 * s.scale);
+          }
           break;
         case 'BOG':
         case 'SLUDGE':
