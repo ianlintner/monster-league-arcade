@@ -20,6 +20,7 @@ import { buildLivePlayInput, projectActor } from '../field/fieldMapper';
 import { LivePlay, type LiveActorState, type LivePlayResult } from '../field/LivePlay';
 import { HazardManager } from '../field/HazardManager';
 import { resolvePassAttempt } from '../field/PlayOrchestrator';
+import { styleForHold } from '../field/Ballistics';
 import type { HazardHit } from '../sim/GameSession';
 
 export const CANVAS_WIDTH = 640;
@@ -93,6 +94,28 @@ export class MatchScene extends Phaser.Scene {
   private isPassPlay = false;
   /** Hold time for the current pass (ms) → lob vs bullet throw style. */
   private passHoldMs = 0;
+  /** Whether the receiving windows are open (C toggles them behind the LOS). */
+  private windowsOpen = false;
+  /** Deterministic check used to trigger the first hazard for the e2e path. */
+  private hazardArmedForDemo = true;
+
+  /** Ball in flight (pass animation) — null when no ball is airborne. */
+  private ballFlight: {
+    fromX: number;
+    fromY: number;
+    toX: number;
+    toY: number;
+    t: number;
+    dur: number;
+    style: 'LOB' | 'BULLET';
+    onLand: () => void;
+  } | null = null;
+
+  /** Floating damage numbers + casualty/death animations, cleared per down. */
+  private damagePopups: { x: number; y: number; text: string; color: number; ttl: number }[] = [];
+  private casualties: { id: string; x: number; y: number; ttl: number }[] = [];
+
+  private looseBall: { x: number; y: number; ttl: number } | null = null;
 
   private pressed = new Set<number>();
 
@@ -121,6 +144,7 @@ export class MatchScene extends Phaser.Scene {
 
     this.fieldGfx = this.add.graphics();
     this.drawField(this.fieldGfx as unknown as DrawSurface);
+    this.drawHazards(this.fieldGfx as unknown as DrawSurface);
 
     // Actors render as small tinted rectangles on a container rebuilt each frame.
     this.actorsLayer = this.add.container(0, 0);
@@ -159,6 +183,7 @@ export class MatchScene extends Phaser.Scene {
         break;
     }
     this.drawActors();
+    this.drawOverlays(dt);
     this.refreshUi();
   }
 
@@ -230,6 +255,11 @@ export class MatchScene extends Phaser.Scene {
     const play = PLAY_CATALOG[this.selectedPlayIndex]!;
     this.isPassPlay = play.kind === 'PASS';
     this.passHoldMs = 0;
+    this.windowsOpen = false;
+    this.ballFlight = null;
+    this.damagePopups = [];
+    this.casualties = [];
+    this.looseBall = null;
     this.pendingHazardHits = [];
     const input = buildLivePlayInput(this.session, play.id, DEFAULT_DEFENSE, 0x9e3779b9);
     this.live = new LivePlay(input);
@@ -242,6 +272,12 @@ export class MatchScene extends Phaser.Scene {
   // ------------------------------------------------------------- live loop
 
   private updateLive(dt: number): void {
+    // Ball-in-flight animation runs to completion before further input lands.
+    if (this.ballFlight) {
+      this.advanceBallFlight();
+      return;
+    }
+
     const live = this.live;
     if (!live) return;
 
@@ -250,22 +286,39 @@ export class MatchScene extends Phaser.Scene {
       this.highlightDefender = (this.highlightDefender + 1) % 7;
     }
 
-    // Pass plays: A/B/C throw to the matching receiver. Hold length sets style.
+    // Pass plays: C opens the receiving windows (scope: behind LOS); A/B/C throw
+    // to the matching receiver while the windows are open. Hold length sets style.
     if (this.isPassPlay) {
-      const throwTarget = this.wasPressed(KeyA)
-        ? 'A'
-        : this.wasPressed(KeyB)
-          ? 'B'
-          : this.wasPressed(KeyC)
-            ? 'C'
-            : null;
-      if (throwTarget) {
-        this.commitPass(throwTarget);
-        return;
+      if (this.wasPressed(KeyC)) {
+        this.windowsOpen = !this.windowsOpen;
+        this.passHoldMs = 0;
       }
-      // Track button hold for lob vs bullet: A (lob, tap) vs C (bullet, hold).
-      if (this.input.keyboard!.addKey(KeyA).isDown) this.passHoldMs += 16;
+      // Track button hold for lob vs bullet on the throw keys (A/B/C).
+      const holdKey =
+        this.input.keyboard!.addKey(KeyA).isDown && this.input.keyboard!.addKey(KeyB).isDown
+          ? null
+          : this.input.keyboard!.addKey(KeyA).isDown
+            ? KeyA
+            : this.input.keyboard!.addKey(KeyB).isDown
+              ? KeyB
+              : this.input.keyboard!.addKey(KeyC).isDown
+                ? KeyC
+                : null;
+      if (holdKey) this.passHoldMs += 16;
       else this.passHoldMs = 0;
+
+      if (this.windowsOpen) {
+        const throwTarget = this.wasPressed(KeyA) ? 'A' : this.wasPressed(KeyB) ? 'B' : null;
+        // C both opens windows and (held) throws to C; a tap toggles. To throw
+        // to C, require a hold — a fresh tap just toggles windows off/on.
+        const cHeld = this.input.keyboard!.addKey(KeyC).isDown;
+        const cTarget = cHeld && this.passHoldMs >= 180 ? 'C' : null;
+        const target = throwTarget ?? cTarget;
+        if (target) {
+          this.commitPass(target);
+          return;
+        }
+      }
     }
 
     // Feed the carrier command, then advance a full 60 Hz frame. Turbo (C) and
@@ -290,18 +343,35 @@ export class MatchScene extends Phaser.Scene {
     }
     if (steps === maxSteps) this.simAccumulator = 0; // drop excess, stay near real time
 
-    // Hazard terrain: evaluate the carrier's current cell; accumulate hits.
+    // Hazard terrain: evaluate the carrier's absolute field cell; accumulate hits.
+    // NOTE: hazards are laid out in absolute field-of-play coords (x∈[0,100]),
+    // so the carrier's LOS-relative x must be offset by the line of scrimmage.
     this.hazardManager.tick(1 / 60);
     const carrier = live.snapshot().actors.find((a) => a.id === live.carrier.id);
     if (carrier) {
       const influence = this.hazardManager.evaluate(
-        carrier.x,
+        carrier.x + this.session.los,
         carrier.y,
         { team: carrier.team, side: carrier.side, slot: carrier.slot as Slot },
-        this.wasPressed(KeyA) && this.isPassPlay === false,
+        this.wasPressed(KeyA) && !this.isPassPlay,
         1 / 60,
       );
-      for (const hit of influence.hits) this.pendingHazardHits.push(hit);
+      for (const hit of influence.hits) {
+        this.pendingHazardHits.push(hit);
+        // Surface the first hazard hit as a floating damage popup at the victim.
+        if (this.hazardArmedForDemo) {
+          const f = projectActor(carrier.x, carrier.y, this.session.los);
+          const s = projectToScreen(f.x, f.y);
+          this.damagePopups.push({
+            x: s.x,
+            y: s.y - 20,
+            text: `-${hit.amount}`,
+            color: toPhaserColor('PUMPKIN_ORANGE'),
+            ttl: 1.2,
+          });
+          this.hazardArmedForDemo = false;
+        }
+      }
     }
 
     if (live.snapshot().outcome.kind === 'WHISTLE') {
@@ -310,21 +380,73 @@ export class MatchScene extends Phaser.Scene {
     }
   }
 
+  /** Advance the airborne ball each frame; resolve on landing. */
+  private advanceBallFlight(): void {
+    const b = this.ballFlight;
+    if (!b) return;
+    b.t += 1 / 60;
+    if (b.t >= b.dur) {
+      this.ballFlight = null;
+      b.onLand();
+    }
+  }
+
   /**
-   * Resolve a pass throw to a receiver A/B/C. The target lead point is the
-   * receiver's live position; defenders are the defensive actors. Commit via
-   * `resolvePassAttempt` → `snap({ target, force })`.
+   * Launch a pass throw to receiver A/B/C. The ball flies a closed-form arc
+   * (lob or bullet by hold length) and only resolves catch vs interception on
+   * landing, giving the shadow/z flight its on-field moment.
    */
   private commitPass(target: 'A' | 'B' | 'C'): void {
     const live = this.live;
     if (!live) return;
     const qb = live.snapshot().actors.find((a) => a.id === live.carrier.id);
-    const defs = live.snapshot().actors.filter((a) => a.side === 'DEFENSE');
-    // Receiver = the target's slot live actor (WR/TE for A, RB2/WR for B, RB1 for C).
+    const receiver = this.receiverFor(target);
+    if (!qb || !receiver) {
+      console.warn(
+        'commitPass: missing qb or receiver',
+        !!qb,
+        !!receiver,
+        'carrier',
+        live.carrier.id,
+        'receiver',
+        target,
+      );
+      return;
+    }
+
+    const style = styleForHold(this.passHoldMs);
+    const dist = Math.hypot(receiver.x - qb.x, receiver.y - qb.y);
+    const speed = style === 'BULLET' ? 22 : 13;
+    // Keep the animation readable regardless of distance (min ~0.45s).
+    const dur = Math.max(0.45, dist / speed);
+    this.windowsOpen = false;
+    this.ballFlight = {
+      fromX: qb.x,
+      fromY: qb.y,
+      toX: receiver.x,
+      toY: receiver.y,
+      t: 0,
+      dur,
+      style,
+      onLand: () => this.resolvePassLanding(target),
+    };
+  }
+
+  private receiverFor(target: 'A' | 'B' | 'C'): LiveActorState | undefined {
+    const live = this.live;
+    if (!live) return undefined;
     const slotFor = { A: 'WR/TE', B: 'RB2/WR', C: 'RB1' } as const;
     const receiverId = `${this.session.possession}-${slotFor[target]}`;
-    const receiver = live.snapshot().actors.find((a) => a.id === receiverId);
-    if (!qb || !receiver) return;
+    return live.snapshot().actors.find((a) => a.id === receiverId);
+  }
+
+  private resolvePassLanding(target: 'A' | 'B' | 'C'): void {
+    const live = this.live;
+    if (!live) return;
+    const qb = live.snapshot().actors.find((a) => a.id === live.carrier.id);
+    const receiver = this.receiverFor(target);
+    const defs = live.snapshot().actors.filter((a) => a.side === 'DEFENSE');
+    if (!qb || !receiver) return this.endDownFromPass();
 
     const snap = resolvePassAttempt(
       {
@@ -340,9 +462,55 @@ export class MatchScene extends Phaser.Scene {
     // Fold any accumulated hazard hits into the same snap.
     if (this.pendingHazardHits.length > 0) snap.hazards = [...this.pendingHazardHits];
     const res = this.session.snap(snap);
-    this.bannerText = res.banner;
+    this.showBanner(res.banner);
+    this.collectDamageAndCasualties();
+    void qb;
+  }
+
+  private endDownFromPass(): void {
+    this.showBanner('INCOMPLETE');
+    this.collectDamageAndCasualties();
+  }
+
+  /** Show the play-over banner and enter the BANNER presentation state. */
+  private showBanner(text: string): void {
+    this.bannerText = text;
     this.bannerTimer = 2.2;
     this.mode = 'BANNER';
+  }
+
+  /** Read the just-committed snap's damage/casualties into floating popups. */
+  private collectDamageAndCasualties(): void {
+    const r = this.session.lastResult;
+    if (!r) return;
+    for (const d of r.damage) {
+      const actor = this.live?.actors.find((a) => a.slot === d.slot && a.team === d.team);
+      if (!actor) continue;
+      const f = projectActor(actor.x, actor.y, this.session.los);
+      const s = projectToScreen(f.x, f.y);
+      this.damagePopups.push({
+        x: s.x,
+        y: s.y - 22,
+        text: `-${d.dealt}`,
+        color: toPhaserColor('VAMPIRE_CRIMSON'),
+        ttl: 1.4,
+      });
+    }
+    for (const c of r.casualties) {
+      const actor = this.live?.actors.find((a) => a.slot === c.slot && a.team === c.team);
+      if (!actor) continue;
+      const f = projectActor(actor.x, actor.y, this.session.los);
+      const s = projectToScreen(f.x, f.y);
+      this.casualties.push({ id: c.playerId, x: s.x, y: s.y, ttl: 2.0 });
+    }
+    if (r.fumble) {
+      const carrier = this.live?.carrier;
+      if (carrier) {
+        const f = projectActor(carrier.x, carrier.y, this.session.los);
+        const s = projectToScreen(f.x, f.y);
+        this.looseBall = { x: s.x, y: s.y, ttl: 2.0 };
+      }
+    }
   }
 
   /** Commit the live-play result into the session and show the play-over banner. */
@@ -363,9 +531,8 @@ export class MatchScene extends Phaser.Scene {
     if (r.tackler) snap.force.tackleDamage = 6 + Math.floor(8 * 0.5);
     if (this.pendingHazardHits.length > 0) snap.hazards = [...this.pendingHazardHits];
     const res = this.session.snap(snap as Parameters<GameSession['snap']>[0]);
-    this.bannerText = res.banner;
-    this.bannerTimer = 2.2;
-    this.mode = 'BANNER';
+    this.showBanner(res.banner);
+    this.collectDamageAndCasualties();
   }
 
   private updateBanner(dt: number): void {
@@ -531,6 +698,48 @@ export class MatchScene extends Phaser.Scene {
     g.lineBetween(base.x - w, base.y - h * 0.55, base.x + w, base.y - h * 0.55);
   }
 
+  /** Render the seeded arena hazards (tombstones, graves, mines, geysers…). */
+  private drawHazards(g: DrawSurface): void {
+    // Hazard coords are absolute field-of-play (x∈[0,100], y lat. ±26.66); the
+    // 10-yard end zone offset maps them into projection space.
+    for (const h of this.hazardManager.snapshot()) {
+      if (!h.armed) continue;
+      const s = projectToScreen(10 + h.x, 26.5 + h.y);
+      switch (h.kind) {
+        case 'TOMBSTONE':
+          g.fillStyle(toPhaserColor('TOMBSTONE_GRAY'), 1);
+          g.fillRect(s.x - 5 * s.scale, s.y - 9 * s.scale, 10 * s.scale, 12 * s.scale);
+          g.lineStyle(1, toPhaserColor('BONE_WHITE'), 0.9);
+          g.lineBetween(s.x - 5 * s.scale, s.y - 9 * s.scale, s.x - 5 * s.scale, s.y - 2 * s.scale);
+          break;
+        case 'OPEN_GRAVE':
+          g.fillStyle(toPhaserColor('VOID_BLACK'), 1);
+          g.fillEllipse(s.x, s.y, 11 * s.scale, 7 * s.scale);
+          g.lineStyle(1, toPhaserColor('TOMBSTONE_GRAY'), 0.9);
+          g.strokeEllipse(s.x, s.y, 11 * s.scale, 7 * s.scale);
+          break;
+        case 'MINE':
+          g.fillStyle(toPhaserColor('PUMPKIN_ORANGE'), 1);
+          g.fillEllipse(s.x, s.y, 6 * s.scale, 6 * s.scale);
+          g.fillStyle(toPhaserColor('ECTO_GREEN'), 1);
+          g.fillRect(s.x - 2 * s.scale, s.y - 3 * s.scale, 4 * s.scale, 2 * s.scale);
+          break;
+        case 'LAVA_GEYSER':
+          g.fillStyle(toPhaserColor('VAMPIRE_CRIMSON'), h.telegraphSeconds > 0 ? 0.4 : 0.9);
+          g.fillEllipse(s.x, s.y, 8 * s.scale, 8 * s.scale);
+          break;
+        case 'BOG':
+        case 'SLUDGE':
+          g.fillStyle(
+            h.kind === 'BOG' ? toPhaserColor('ECTO_GREEN') : toPhaserColor('IRON_BEZEL'),
+            0.4,
+          );
+          g.fillEllipse(s.x, s.y, 12 * s.scale, 9 * s.scale);
+          break;
+      }
+    }
+  }
+
   /** Rebuild the actor sprites each frame, y-sorted, with shadows + indicators. */
   private drawActors(): void {
     this.actorsLayer.removeAll(true);
@@ -558,6 +767,9 @@ export class MatchScene extends Phaser.Scene {
 
     actors.sort((a, b) => a.depth - b.depth);
     for (const a of actors) this.drawActor(a);
+
+    // Passing windows float over eligible receivers while open (pass play).
+    if (this.isPassPlay && this.windowsOpen && !this.ballFlight) this.drawPassWindows();
   }
 
   private drawActor(a: RenderActor): void {
@@ -615,6 +827,105 @@ export class MatchScene extends Phaser.Scene {
     g.fillTriangle(cx, cy - r, cx + r * 0.7, cy, cx, cy + r);
     g.fillTriangle(cx, cy - r, cx - r * 0.7, cy, cx, cy + r);
     g.fillTriangle(cx - r, cy, cx + r, cy, cx, cy - r * 1.6);
+  }
+
+  // -------------------------------------------------------- overlays (frame)
+
+  /** Cyan [A][B][C] badges over receivers + lead reticle on the turf. */
+  private drawPassWindows(): void {
+    const live = this.live;
+    if (!live) return;
+    const keys = ['A', 'B', 'C'] as const;
+    const slotFor = { A: 'WR/TE', B: 'RB2/WR', C: 'RB1' } as const;
+    for (const key of keys) {
+      const id = `${this.session.possession}-${slotFor[key]}`;
+      const actor = live.actors.find((a) => a.id === id);
+      if (!actor) continue;
+      const f = projectActor(actor.x, actor.y, this.session.los);
+      const s = projectToScreen(f.x, f.y);
+
+      // Turf lead reticle: a dashed-ish cyan diamond ahead of the receiver.
+      const g = this.indicatorGfx;
+      g.lineStyle(2, toPhaserColor('SPECTRAL_CYAN'), 0.9);
+      const rx = 7 * s.scale;
+      g.lineBetween(s.x - rx, s.y, s.x, s.y - rx);
+      g.lineBetween(s.x, s.y - rx, s.x + rx, s.y);
+      g.lineBetween(s.x + rx, s.y, s.x, s.y + rx);
+      g.lineBetween(s.x, s.y + rx, s.x - rx, s.y);
+
+      // Badge label floats ~20px above the receiver's head.
+      const badge = this.add
+        .text(s.x, s.y - 26 * s.scale, `[${key}]`, {
+          fontFamily: '"Press Start 2P", monospace',
+          fontSize: '8px',
+          color: P.SPECTRAL_CYAN,
+          backgroundColor: 'rgba(11,7,17,0.7)',
+        })
+        .setOrigin(0.5, 0.5)
+        .setDepth(200);
+      this.actorsLayer.add(badge);
+    }
+  }
+
+  /** Draw the airborne ball with its ground shadow, plus popups/death/loose ball. */
+  private drawOverlays(dt: number): void {
+    const g = this.indicatorGfx;
+
+    // Ball in flight: ellipse shadow on the turf + ball offset up by z.
+    if (this.ballFlight) {
+      const b = this.ballFlight;
+      const tt = Math.max(0, Math.min(1, b.t / b.dur));
+      const px = b.fromX + (b.toX - b.fromX) * tt;
+      const py = b.fromY + (b.toY - b.fromY) * tt;
+      // Closed-form apex (parabola) matches Ballistics.sampleFlight.
+      const apex = b.style === 'BULLET' ? 1.0 : 1.8;
+      const z = apex * 4 * tt * (1 - tt);
+      const f = projectActor(px, py, this.session.los);
+      const s = projectToScreen(f.x, f.y, z);
+      g.fillStyle(0x000000, 0.35);
+      g.fillEllipse(s.x, s.y + z, 7 * s.scale, 4 * s.scale);
+      g.fillStyle(toPhaserColor('PUMPKIN_ORANGE'), 1);
+      g.fillEllipse(s.x, s.y, 4 * s.scale, 4 * s.scale);
+    }
+
+    // Damage numbers, rising and fading (x/y are cached screen coords).
+    for (const p of this.damagePopups) {
+      const rise = 20 * (1 - p.ttl / 1.4);
+      const a = Math.max(0, p.ttl / 1.4);
+      const t = this.add
+        .text(p.x, p.y - rise, p.text, {
+          fontFamily: '"Press Start 2P", monospace',
+          fontSize: '9px',
+          color: `#${p.color.toString(16).padStart(6, '0')}`,
+        })
+        .setOrigin(0.5, 0.5)
+        .setAlpha(a)
+        .setDepth(300);
+      this.actorsLayer.add(t);
+      p.ttl -= dt;
+    }
+    this.damagePopups = this.damagePopups.filter((p) => p.ttl > 0);
+
+    // Casualties: the victim shatters into a red/bone bloom then vanishes.
+    for (const c of this.casualties) {
+      const a = Math.max(0, c.ttl / 2.0);
+      g.fillStyle(toPhaserColor('VAMPIRE_CRIMSON'), a);
+      g.fillEllipse(c.x, c.y, 18 * (1 - c.ttl / 2.0), 18 * (1 - c.ttl / 2.0));
+      g.fillStyle(toPhaserColor('BONE_WHITE'), a);
+      g.fillEllipse(c.x, c.y, 8, 8);
+      c.ttl -= dt;
+    }
+    this.casualties = this.casualties.filter((c) => c.ttl > 0);
+
+    // Loose ball: a bouncing amber orb at the recovery spot.
+    if (this.looseBall) {
+      const lb = this.looseBall;
+      const bounce = Math.abs(Math.sin(lb.ttl * 8)) * 6;
+      g.fillStyle(toPhaserColor('HELLFIRE_AMBER'), 1);
+      g.fillEllipse(lb.x, lb.y - bounce, 5, 5);
+      lb.ttl -= dt;
+      if (lb.ttl <= 0) this.looseBall = null;
+    }
   }
 
   // ------------------------------------------------------------- HUD / dom
@@ -678,6 +989,11 @@ export class MatchScene extends Phaser.Scene {
     const session = () => this.session;
     const live = () => this.live;
     const mode = () => this.mode;
+    const isPassPlay = () => this.isPassPlay;
+    const windowsOpen = () => this.windowsOpen;
+    const selectedPlay = () => this.selectedPlayIndex;
+    const lastResult = () => this.session.lastResult;
+    const hazardManager = () => this.hazardManager;
     (window as unknown as Record<string, unknown>).__mlf = {
       session: session(),
       get phase() {
@@ -698,12 +1014,53 @@ export class MatchScene extends Phaser.Scene {
       get carrierId() {
         return live()?.carrier.id ?? null;
       },
+      get isPassPlay() {
+        return isPassPlay();
+      },
+      get windowsOpen() {
+        return windowsOpen();
+      },
+      get playIndex() {
+        return selectedPlay();
+      },
+      get lastDamage() {
+        return lastResult()?.damage.length ?? 0;
+      },
+      get lastCasualties() {
+        return lastResult()?.casualties.length ?? 0;
+      },
+      get hazards() {
+        return hazardManager().snapshot();
+      },
+      get actors() {
+        return (
+          live()?.actors.map((a) => ({ id: a.id, side: a.side, slot: a.slot, x: a.x, y: a.y })) ??
+          []
+        );
+      },
       pick: (i: number) => {
         this.selectedPlayIndex = Math.max(0, Math.min(2, Number(i) || 0));
         this.confirmPlay(this.selectedPlayIndex);
       },
       snap: () => {
         if (this.mode === 'PRE_SNAP') this.mode = 'LIVE';
+      },
+      openWindows: () => {
+        if (this.mode === 'LIVE' && this.isPassPlay) this.windowsOpen = true;
+      },
+      throwTo: (t: 'A' | 'B' | 'C') => {
+        if (this.mode === 'LIVE' && this.isPassPlay && this.windowsOpen && !this.ballFlight) {
+          this.commitPass(t);
+        }
+      },
+      // Test seam: relocate the live carrier to an absolute field-of-play cell so
+      // the real hazard→damage/casualty pipeline fires deterministically.
+      forceCarrierTo: (x: number, y: number) => {
+        const l = this.live;
+        if (!l) return;
+        const c = l.carrier;
+        c.x = Number(x) - this.session.los;
+        c.y = Number(y);
       },
     };
   }

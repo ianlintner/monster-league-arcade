@@ -344,7 +344,10 @@ export class LivePlay {
     const dy = wp.y - this.carrier.y;
     const m = Math.hypot(dx, dy);
     if (m < 0.5) {
-      // Reached the waypoint; advance to the next (or run out the route).
+      // Reached the waypoint. At the final waypoint the carrier holds its spot
+      // (return neutral instead of recursing, which would overflow the stack),
+      // otherwise advance to the next.
+      if (this.waypointIndex >= route.length - 1) return { x: 0, y: 0 };
       this.waypointIndex += 1;
       return this.carrierHeading();
     }
