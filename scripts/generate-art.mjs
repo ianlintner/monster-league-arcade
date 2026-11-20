@@ -53,94 +53,230 @@ class Buf {
 }
 
 // ---- faction styling ---------------------------------------------------------------------------
+// Each faction has a home (primary jersey) and away (light/white jersey) uniform
+// per PLAN §2.3. The sheet is generated with the home palette; `away` is the
+// documented swap the runtime applies as a tint/secondary palette.
 const STYLE = {
   boneyard_reapers: {
     skin: M.BONE_WHITE,
-    jersey: F.OBSIDIAN_PURPLE,
-    trim: M.BONE_WHITE,
-    pad: M.TOMBSTONE_GRAY,
+    home: {
+      jersey: F.OBSIDIAN_PURPLE,
+      trim: M.BONE_WHITE,
+      pad: M.TOMBSTONE_GRAY,
+      pants: F.OBSIDIAN_PURPLE,
+    },
+    away: {
+      jersey: M.BONE_WHITE,
+      trim: F.OBSIDIAN_PURPLE,
+      pad: M.TOMBSTONE_GRAY,
+      pants: M.BONE_WHITE,
+    },
     eye: M.SPECTRAL_CYAN,
-    pants: F.OBSIDIAN_PURPLE,
   },
   rotting_deadskins: {
     skin: F.PUTRID_OLIVE,
-    jersey: F.RUST_BLOOD,
-    trim: M.ECTO_GREEN,
-    pad: F.RUST_BLOOD,
+    home: {
+      jersey: F.RUST_BLOOD,
+      trim: M.ECTO_GREEN,
+      pad: F.RUST_BLOOD,
+      pants: dark(F.RUST_BLOOD),
+    },
+    away: {
+      jersey: M.AGED_PARCHMENT,
+      trim: F.RUST_BLOOD,
+      pad: F.RUST_BLOOD,
+      pants: M.AGED_PARCHMENT,
+    },
     eye: M.HELLFIRE_AMBER,
-    pants: dark(F.RUST_BLOOD),
   },
   transylvania_nightstalkers: {
     skin: M.AGED_PARCHMENT,
-    jersey: F.MIDNIGHT_CRIMSON,
-    trim: F.VAMPIRE_GOLD,
-    pad: F.VELVET_BLACK,
+    home: {
+      jersey: F.MIDNIGHT_CRIMSON,
+      trim: F.VAMPIRE_GOLD,
+      pad: F.VELVET_BLACK,
+      pants: F.VELVET_BLACK,
+    },
+    away: {
+      jersey: M.BONE_WHITE,
+      trim: F.MIDNIGHT_CRIMSON,
+      pad: F.VELVET_BLACK,
+      pants: M.BONE_WHITE,
+    },
     eye: M.VAMPIRE_CRIMSON,
-    pants: F.VELVET_BLACK,
   },
   salem_bayou_ghouls: {
     skin: F.SWAMP_MOSS,
-    jersey: F.HEX_VIOLET,
-    trim: M.PUMPKIN_ORANGE,
-    pad: F.HEX_VIOLET,
+    home: { jersey: F.HEX_VIOLET, trim: M.PUMPKIN_ORANGE, pad: F.HEX_VIOLET, pants: F.SWAMP_MOSS },
+    away: {
+      jersey: M.AGED_PARCHMENT,
+      trim: F.HEX_VIOLET,
+      pad: F.HEX_VIOLET,
+      pants: M.AGED_PARCHMENT,
+    },
     eye: M.PUMPKIN_ORANGE,
-    pants: F.SWAMP_MOSS,
   },
   necro_ref: {
     skin: M.BONE_WHITE,
-    jersey: M.BONE_WHITE,
-    trim: M.VOID_BLACK,
-    pad: M.VOID_BLACK,
+    home: { jersey: M.BONE_WHITE, trim: M.VOID_BLACK, pad: M.VOID_BLACK, pants: M.VOID_BLACK },
+    away: { jersey: M.BONE_WHITE, trim: M.VOID_BLACK, pad: M.VOID_BLACK, pants: M.VOID_BLACK },
     eye: M.VAMPIRE_CRIMSON,
-    pants: M.VOID_BLACK,
     stripes: true,
   },
   demon_ref: {
     skin: M.VAMPIRE_CRIMSON,
-    jersey: M.BONE_WHITE,
-    trim: M.VOID_BLACK,
-    pad: M.VOID_BLACK,
+    home: { jersey: M.BONE_WHITE, trim: M.VOID_BLACK, pad: M.VOID_BLACK, pants: M.VOID_BLACK },
+    away: { jersey: M.BONE_WHITE, trim: M.VOID_BLACK, pad: M.VOID_BLACK, pants: M.VOID_BLACK },
     eye: M.HELLFIRE_AMBER,
-    pants: M.VOID_BLACK,
     stripes: true,
   },
 };
 
-/** pose: view{kind,s}, bob, lx, rx, ll, rl (leg lift), al/ar hand [dx,dy], lean */
-function drawUpright(b, id, p) {
+/** Resolve the active uniform palette (home by default). */
+function uniform(id, away = false) {
   const st = STYLE[id];
+  const u = away ? st.away : st.home;
+  return { ...st, jersey: u.jersey, trim: u.trim, pad: u.pad, pants: u.pants };
+}
+
+/**
+ * Facemask grill colour per character. Chosen to contrast BOTH the face skin
+ * it sits over and the helmet shell/ear-flaps it attaches to, so the mask reads
+ * as a mask instead of vanishing into a same-toned skin (e.g. Reapers' bone-
+ * white face against a grey mask).
+ */
+export function maskColor(id) {
+  switch (id) {
+    case 'boneyard_reapers':
+      return M.VOID_BLACK; // black grill over the bone-white skull face
+    case 'rotting_deadskins':
+      return M.BONE_WHITE; // bone bar over olive skin
+    case 'transylvania_nightstalkers':
+      return F.VAMPIRE_GOLD; // gilded grill over parchment skin + black shell
+    case 'salem_bayou_ghouls':
+      return M.BONE_WHITE; // pale bar over swamp-green skin
+    case 'necro_ref':
+      return M.VOID_BLACK;
+    case 'demon_ref':
+      return M.BONE_WHITE;
+    default:
+      return M.TOMBSTONE_GRAY;
+  }
+}
+
+/**
+ * Domed football helmet. Shell + crown accents only: the facemask grill and
+ * teeth are drawn separately (see facemask()) so they can be layered ON TOP of
+ * the face skin, not hidden under it.
+ */
+function helmet(b, cx, hy, st, v, id) {
+  const side = v.kind === 'side';
+  const w = side ? 11 : 12;
+  const x0 = cx - Math.floor(w / 2);
+  // crown: rounded top (ellipse) over a straight-sided shell
+  b.ell(cx, hy + 3, Math.floor(w / 2), 3, st.pad);
+  b.rect(x0, hy + 3, w, 5, st.pad);
+  b.rect(x0, hy + 3, w, 1, light(st.pad)); // top rim highlight
+  // ear flaps
+  b.rect(x0, hy + 6, 2, 3, dark(st.pad));
+  b.rect(x0 + w - 2, hy + 6, 2, 3, dark(st.pad));
+  // faction helmet accents (crown / forehead, never the face opening)
+  if (id === 'boneyard_reapers') {
+    // skull sockets show through the face opening's upper rim
+    b.rect(cx - 3, hy + 4, 2, 2, M.VOID_BLACK);
+    b.rect(cx + 1, hy + 4, 2, 2, M.VOID_BLACK);
+  }
+  if (id === 'rotting_deadskins') {
+    // exposed brain: a lighter patch on the crown
+    b.rect(cx - 2, hy + 1, 4, 2, M.ECTO_GREEN);
+  }
+  if (id === 'transylvania_nightstalkers') {
+    // sleek visor band
+    b.rect(x0 + 1, hy + 4, w - 2, 1, F.VAMPIRE_GOLD);
+  }
+  if (id === 'necro_ref' || id === 'demon_ref') {
+    b.rect(x0 + 1, hy + 4, w - 2, 1, M.VOID_BLACK); // ref cap band
+  }
+}
+
+/**
+ * Facemask grill + faction mouth accents, drawn AFTER the face/skin so the bar
+ * is never overwritten by the face rectangle. Front view: horizontal bar with
+ * visible side attachments onto the ear flaps plus vertical centre struts; a
+ * couple of factions get offset/crooked struts. Side view: a forward bar.
+ */
+function facemask(b, cx, hy, v, id) {
+  const mask = maskColor(id);
+  const side = v.kind === 'side';
+  const w = side ? 11 : 12;
+  const x0 = cx - Math.floor(w / 2);
+  if (side) {
+    const dir = v.s >= 0 ? 1 : -1;
+    const fx = dir === 1 ? x0 + w : x0 - 2;
+    b.rect(fx, hy + 5, 2, 3, mask);
+    b.rect(fx + (dir === 1 ? 1 : -1), hy + 5, 1, 3, mask);
+    return;
+  }
+  // horizontal bar spanning the face opening
+  b.rect(x0 + 1, hy + 7, w - 2, 1, mask);
+  // side attachments: a vertical connector at each end of the bar, down onto
+  // the ear flap, so the bar visibly joins the helmet instead of floating.
+  b.rect(x0, hy + 7, 1, 3, mask);
+  b.rect(x0 + w - 1, hy + 7, 1, 3, mask);
+  // centre vertical struts
+  b.rect(cx - 1, hy + 8, 1, 2, mask);
+  b.rect(cx + 1, hy + 8, 1, 2, mask);
+  // faction mouth accents
+  if (id === 'boneyard_reapers') {
+    // jaw teeth show below the mask bar
+    b.rect(cx - 2, hy + 9, 4, 1, M.BONE_WHITE);
+  }
+  if (id === 'salem_bayou_ghouls') {
+    // crooked witch-iron facemask: offset vertical struts
+    b.rect(cx - 2, hy + 8, 1, 2, mask);
+    b.rect(cx + 2, hy + 8, 1, 2, mask);
+  }
+}
+
+/**
+ * pose: view{kind,s}, bob, lx, rx, ll, rl (leg lift), al/ar hand [dx,dy], lean,
+ *       hold (ball [dx,dy]), away (bool).
+ * Draws a readable football player: domed helmet + facemask, shoulder pads
+ * wider than the hips, and one unmistakable faction feature per team.
+ */
+function drawUpright(b, id, p) {
+  const st = uniform(id, p.away);
   const cx = 24 + (p.lean ?? 0);
   const bob = p.bob ?? 0;
   const v = p.view ?? { kind: 'front', s: 0 };
   const side = v.kind === 'side';
+  const back = v.kind === 'back';
   // Rear three-quarter views (NE/NW) turn the upper body into the run while the
-  // legs stay planted; s=0 is square-on (N). Without this the NE/N/NW rows are
-  // pixel-identical because the back view previously ignored v.s entirely.
-  const rear = v.kind === 'back' ? v.s : 0; // -1 (NW/left), 0 (N), +1 (NE/right)
+  // legs stay planted; s=0 is square-on (N).
+  const rear = back ? v.s : 0; // -1 (NW/left), 0 (N), +1 (NE/right)
   const up = rear * 2; // upper-body horizontal offset toward the turn
-  const tw = side ? 9 : 14;
-  const legY = 32 + bob;
+
+  // ---- legs (drawn first, behind torso) ----
+  const legY = 33 + bob;
   const lleg = (side ? cx - 4 : cx - 6) + (p.lx ?? 0);
   const rleg = (side ? cx + 0 : cx + 2) + (p.rx ?? 0);
   for (const [lx, lift] of [
     [lleg, p.ll ?? 0],
     [rleg, p.rl ?? 0],
   ]) {
-    b.rect(lx, legY, 4, 10 - bob - lift, st.pants);
+    b.rect(lx, legY, 4, 9 - bob - lift, st.pants);
     b.rect(
       lx - 1,
-      legY + 9 - bob - lift,
+      legY + 8 - bob - lift,
       6,
       3,
       M.VOID_BLACK === st.pants ? M.IRON_BEZEL : dark(st.pants),
     );
   }
-  // arms (behind torso for back view is fine)
-  const shY = 23 + bob;
-  const armC =
-    id === 'rotting_deadskins' || id === 'salem_bayou_ghouls' || id === 'demon_ref'
-      ? st.skin
-      : st.skin;
+
+  // ---- arms (behind torso) ----
+  const shY = 22 + bob;
+  const armC = st.skin;
   const sx = side ? 4 : 9;
   b.line(cx + up - sx, shY, cx + up - sx + (p.al?.[0] ?? -2), shY + (p.al?.[1] ?? 8), armC, 2);
   b.line(
@@ -151,58 +287,86 @@ function drawUpright(b, id, p) {
     armC,
     2,
   );
-  // torso
+
+  // ---- torso / jersey ----
+  // Nightstalkers cape drawn FIRST (behind the jersey) so the rear-view number
+  // plate and away uniform are never covered; only its 2px edges peek out.
+  const tw = side ? 9 : 12; // torso narrower than the shoulder pads
   const tx = cx + up - Math.floor(tw / 2);
+  if (id === 'transylvania_nightstalkers' && back)
+    b.rect(cx + up - 8, 20 + bob, 16, 16, F.MIDNIGHT_CRIMSON);
   b.rect(tx, 20 + bob, tw, 13, st.jersey);
   b.rect(tx, 20 + bob, tw, 2, light(st.jersey)); // top-left rim highlight band
   if (st.stripes) for (let i = 0; i < tw; i += 3) b.rect(tx + i, 22 + bob, 1, 11, M.VOID_BLACK);
   else b.rect(tx, 29 + bob, tw, 2, st.trim); // jersey belt trim
-  if (id === 'boneyard_reapers' && !side && v.kind === 'front')
-    for (let y = 23; y < 29; y += 2) b.rect(cx + up - 4, y + bob, 8, 1, M.BONE_WHITE); // ribcage
+  // back view: jersey number plate (a light rectangle where the number sits)
+  if (back) b.rect(cx + up - 3, 23 + bob, 6, 5, light(st.jersey));
+
+  // ---- faction torso features ----
+  if (id === 'boneyard_reapers' && !side && !back)
+    for (let y = 23; y < 29; y += 2) b.rect(cx + up - 4, y + bob, 8, 1, M.BONE_WHITE); // exposed ribs
   if (id === 'salem_bayou_ghouls')
     b.rect(cx + up - 2 + (side ? 2 : 0), 31 + bob, 4, 3, M.PUMPKIN_ORANGE); // lantern belt
-  if (id === 'rotting_deadskins') {
-    b.px(tx + 2, 27 + bob, st.skin);
+  if (id === 'rotting_deadskins' && !back) {
+    b.px(tx + 2, 27 + bob, st.skin); // torn jersey holes
     b.px(tx + 6, 31 + bob, st.skin);
-  } // torn jersey
-  // shoulder pads
+  }
+
+  // ---- shoulder pads (wider than hips) ----
   const padL = id === 'rotting_deadskins' ? 8 : 6;
   const padR = id === 'rotting_deadskins' ? 5 : 6;
   if (!side) {
-    b.rect(cx + up - 10, 19 + bob, padL, 5, st.pad);
-    b.rect(cx + up - 10, 19 + bob, padL, 1, light(st.pad));
-    b.rect(cx + up + 10 - padR, 19 + bob, padR, 5, st.pad);
+    b.rect(cx + up - 10, 18 + bob, padL, 5, st.pad);
+    b.rect(cx + up - 10, 18 + bob, padL, 1, light(st.pad));
+    b.rect(cx + up + 10 - padR, 18 + bob, padR, 5, st.pad);
     if (id === 'boneyard_reapers') {
+      // jagged shoulder spikes
+      b.px(cx + up - 10, 16 + bob, M.BONE_WHITE);
       b.px(cx + up - 9, 17 + bob, M.BONE_WHITE);
-      b.px(cx + up - 9, 18 + bob, M.BONE_WHITE);
+      b.px(cx + up + 9, 16 + bob, M.BONE_WHITE);
       b.px(cx + up + 8, 17 + bob, M.BONE_WHITE);
-      b.px(cx + up + 8, 18 + bob, M.BONE_WHITE);
     }
     if (id === 'transylvania_nightstalkers') {
-      b.rect(cx + up - 10, 18 + bob, 3, 2, F.VAMPIRE_GOLD);
-      b.rect(cx + up + 7, 18 + bob, 3, 2, F.VAMPIRE_GOLD);
-      b.rect(cx + up - 7, 34 + bob, 14, 3, F.VELVET_BLACK);
+      // bat-wing shoulder armor + high collar
+      b.rect(cx + up - 10, 17 + bob, 3, 2, F.VAMPIRE_GOLD);
+      b.rect(cx + up + 7, 17 + bob, 3, 2, F.VAMPIRE_GOLD);
+      b.rect(cx + up - 3, 16 + bob, 6, 2, F.VELVET_BLACK); // high collar
     }
-  } else b.rect(cx - 4, 19 + bob, 8, 5, st.pad);
-  // head
-  const hy = 9 + bob;
-  b.rect(cx + up - 5, hy, 10, 10, st.skin);
-  b.rect(cx + up - 5, hy, 10, 1, light(st.skin));
-  if (id === 'boneyard_reapers') {
-    b.rect(cx + up - 6, hy - 1, 12, 3, M.TOMBSTONE_GRAY);
-    b.px(cx + up - 6, hy - 3, M.BONE_WHITE);
-    b.px(cx + up - 6, hy - 2, M.BONE_WHITE);
-    b.px(cx + up + 5, hy - 3, M.BONE_WHITE);
-    b.px(cx + up + 5, hy - 2, M.BONE_WHITE);
+  } else b.rect(cx - 4, 18 + bob, 8, 5, st.pad);
+
+  // ---- head + helmet ----
+  const hy = 8 + bob;
+  helmet(b, cx + up, hy, st, v, id);
+  if (!back) {
+    // face (skin) painted FIRST, then the facemask grill on top, so the bar and
+    // teeth are never overwritten by the face rectangle (paint-order fix).
+    b.rect(cx + up - 4, hy + 6, 8, 3, st.skin);
+    facemask(b, cx + up, hy, v, id);
+    // eyes last, so they stay visible over the grill bar
+    const ey = hy + 7;
+    if (v.kind === 'front') {
+      b.rect(cx - 3 + v.s * 2, ey, 2, 2, st.eye);
+      b.rect(cx + 1 + v.s * 2, ey, 2, 2, st.eye);
+    } else if (side) b.rect(cx + v.s * 3 - 1, ey, 2, 2, st.eye);
   }
+
+  // ---- faction head features ----
   if (id === 'transylvania_nightstalkers') {
-    b.rect(cx + up - 5, hy - 1, 10, 3, F.VELVET_BLACK);
-    b.rect(cx + up - 6, hy + 8, 12, 2, F.VELVET_BLACK);
+    // fangs
+    if (!back) {
+      b.px(cx + up - 2, hy + 9, M.BONE_WHITE);
+      b.px(cx + up + 1, hy + 9, M.BONE_WHITE);
+    }
   }
   if (id === 'salem_bayou_ghouls') {
-    b.rect(cx + up - 6, hy - 2, 12, 5, F.HEX_VIOLET);
-    b.rect(cx + up - 6, hy + 3, 2, 7, F.HEX_VIOLET);
-    b.rect(cx + up + 4, hy + 3, 2, 7, F.HEX_VIOLET);
+    // hood over the helmet
+    b.rect(cx + up - 6, hy - 2, 12, 4, F.HEX_VIOLET);
+    b.rect(cx + up - 6, hy + 2, 2, 6, F.HEX_VIOLET);
+    b.rect(cx + up + 4, hy + 2, 2, 6, F.HEX_VIOLET);
+  }
+  if (id === 'rotting_deadskins' && !back) {
+    // one dangling arm (the torn-sleeve arm hangs lower)
+    b.line(cx + up + sx - 1, shY, cx + up + sx + 1, shY + 12, armC, 2);
   }
   if (id === 'demon_ref') {
     b.px(cx + up - 5, hy - 2, M.BONE_WHITE);
@@ -210,20 +374,8 @@ function drawUpright(b, id, p) {
     b.px(cx + up + 4, hy - 2, M.BONE_WHITE);
     b.px(cx + up + 5, hy - 3, M.BONE_WHITE);
   }
-  if (id === 'necro_ref') b.rect(cx + up - 5, hy - 2, 10, 3, M.VOID_BLACK);
-  if (id === 'rotting_deadskins') b.rect(cx + up - 5, hy, 10, 2, dark(st.skin));
-  // eyes
-  const ey = hy + 4;
-  if (v.kind === 'front') {
-    b.rect(cx - 3 + v.s * 2, ey, 2, 2, st.eye);
-    b.rect(cx + 1 + v.s * 2, ey, 2, 2, st.eye);
-  } else if (v.kind === 'side') b.rect(cx + v.s * 3 - 1, ey, 2, 2, st.eye);
-  if (v.kind !== 'back') b.rect(cx - 2 + (side ? v.s * 2 : v.s * 2), hy + 8, 4, 1, M.VOID_BLACK);
-  // faction facemask / cape
-  if (id === 'salem_bayou_ghouls' && v.kind === 'front')
-    b.rect(cx - 4, hy + 7, 8, 1, M.TOMBSTONE_GRAY);
-  if (id === 'transylvania_nightstalkers' && v.kind === 'back')
-    b.rect(cx + up - 6, 21 + bob, 12, 16, F.MIDNIGHT_CRIMSON);
+
+  // ---- ball ----
   if (p.hold)
     b.ell(
       cx + p.hold[0],
@@ -235,8 +387,8 @@ function drawUpright(b, id, p) {
 }
 
 /** Horizontal body (dive, knockdown, collapse). dirX: 1 head right; up: lying on back face-up. */
-function drawHoriz(b, id, { x = 6, y = 28, dirX = 1, tilt = 0, smear = 0 } = {}) {
-  const st = STYLE[id];
+function drawHoriz(b, id, { x = 6, y = 28, dirX = 1, tilt = 0, smear = 0, away = false } = {}) {
+  const st = uniform(id, away);
   const px = (rx) => (dirX === 1 ? x + rx : 47 - x - rx);
   const R = (rx, ry, w, h, c) =>
     b.rect(dirX === 1 ? px(rx) : px(rx) - w + 1, y + ry + tilt, w, h, c);
@@ -264,7 +416,7 @@ function drawHoriz(b, id, { x = 6, y = 28, dirX = 1, tilt = 0, smear = 0 } = {})
 const TOMB = M.TOMBSTONE_GRAY;
 
 // ---- animation poses ---------------------------------------------------------------------------
-const DIRS = [
+export const DIRS = [
   { kind: 'front', s: 0 },
   { kind: 'front', s: 1 },
   { kind: 'side', s: 1 },
@@ -275,31 +427,54 @@ const DIRS = [
   { kind: 'front', s: -1 },
 ];
 
-function drawFrame(id, anim, f, dirIdx = 0) {
+// A real 6-frame run gait. Each entry is a full pose over the stride cycle:
+// contact / down / passing / up / passing / contact (mirrored). leg x-offsets
+// give a 4+px stride, leg lift gives the vertical phase, and arms swing OPPOSITE
+// the legs (contralateral: left arm forward when the right leg is forward).
+// `dir` is +1 (running right/E) or -1 (left/W) for side views.
+export const RUN_GAIT = [
+  //               lx   ll   rx   rl   al(arm)       ar(arm)
+  { lx: 2, ll: 0, rx: -3, rl: 0, al: [-5, 5], ar: [4, 11] }, // contact (left leg planted, full arm reach)
+  { lx: 4, ll: 2, rx: -5, rl: 0, al: [-6, 4], ar: [5, 10] }, // down (right arm swings high)
+  { lx: 0, ll: 3, rx: 0, rl: 3, al: [0, 6], ar: [0, 12] }, // passing (legs together, arms vertical)
+  { lx: -3, ll: 0, rx: 2, rl: 4, al: [4, 11], ar: [-5, 5] }, // up (right leg up, left arm reach)
+  { lx: -5, ll: 0, rx: 4, rl: 2, al: [5, 10], ar: [-6, 4] }, // passing (mirrored)
+  { lx: -3, ll: 0, rx: 2, rl: 0, al: [4, 11], ar: [-5, 5] }, // contact (mirrored)
+];
+
+export function drawFrame(id, anim, f, dirIdx = 0, away = false) {
   const b = new Buf(48, 48);
   const bounce = [0, 1, 0, 1][f % 4];
+  const av = { away };
   switch (anim) {
     case 'idle_stance':
-      drawUpright(b, id, { bob: bounce, al: [-3, 7 + bounce], ar: [3, 7 - bounce] });
+      drawUpright(b, id, { bob: bounce, al: [-3, 7 + bounce], ar: [3, 7 - bounce], ...av });
       break;
     case 'run_8dir': {
       const v = DIRS[dirIdx];
-      const ph = (f / 6) * Math.PI * 2;
-      const sw = Math.round(Math.sin(ph) * 3);
+      const g = RUN_GAIT[f % 6];
       const side = v.kind === 'side';
-      const bob = f % 3 === 0 ? 1 : 0;
+      // Direction sign: side views run toward their facing (+1 E / -1 W); front
+      // and back views run toward the torso after redirection.
+      const dir = side ? (v.s >= 0 ? 1 : -1) : v.s || 0;
+      const lean = side ? dir * 2 : 0; // 2px torso lean in the run direction
+      const bob = [2, 0, 1, 3, 1, 2][f % 6]; // vertical bob over the stride
       drawUpright(b, id, {
         view: v,
         bob,
-        lean: side ? v.s : 0,
-        lx: side ? sw : 0,
-        rx: side ? -sw : 0,
-        ll: !side && sw > 0 ? 3 : 0,
-        rl: !side && sw < 0 ? 3 : 0,
-        al: [-2 - (side ? 0 : 0), 8 - sw],
-        ar: [2, 8 + sw],
+        lean,
+        // side view: legs separate front/back by the stride (4+ px); front/back
+        // view: legs lift alternately.
+        lx: side ? g.lx * dir : 0,
+        rx: side ? g.rx * dir : 0,
+        ll: side ? g.ll : g.ll,
+        rl: side ? g.rl : g.rl,
+        al: side ? [g.al[0] * dir, g.al[1]] : g.al,
+        ar: side ? [g.ar[0] * dir, g.ar[1]] : g.ar,
+        ...av,
       });
-      if (f % 2 === 0) {
+      // dust puffs under the planted foot on contact frames
+      if (f % 3 === 0) {
         const dc = id === 'rotting_deadskins' ? M.ECTO_GREEN : TOMB;
         b.px(24 - 9 * (v.s || 0) - 4, 44, dc);
         b.px(24 - 9 * (v.s || 0) - 6, 43, dc);
@@ -319,17 +494,30 @@ function drawFrame(id, anim, f, dirIdx = 0) {
         ar: [-2, 6],
         al,
         hold: f < 3 ? [6 - f * 2, f === 1 ? -9 : 2] : null,
+        ...av,
       });
       break;
     }
     case 'dive_tackle_lunge':
       // Keep the body + motion smear inside the 48px cell with a >=1px margin (max
       // head-right 45, min smear-left 2). Originally { x:[8,4,2], smear:f+1 } clipped.
-      drawHoriz(b, id, { x: [8, 6, 5][f], y: [22, 26, 32][f], tilt: 0, smear: [1, 2, 3][f] });
+      drawHoriz(b, id, {
+        x: [8, 6, 5][f],
+        y: [22, 26, 32][f],
+        tilt: 0,
+        smear: [1, 2, 3][f],
+        ...av,
+      });
       break;
     case 'hit_stagger_knockdown': {
       if (f === 0) {
-        drawUpright(b, id, { view: { kind: 'side', s: 1 }, lean: -2, al: [-5, 4], ar: [5, 3] });
+        drawUpright(b, id, {
+          view: { kind: 'side', s: 1 },
+          lean: -2,
+          al: [-5, 4],
+          ar: [5, 3],
+          ...av,
+        });
         b.recolorSolid(M.BONE_WHITE);
       } else if (f === 1)
         drawUpright(b, id, {
@@ -338,22 +526,48 @@ function drawFrame(id, anim, f, dirIdx = 0) {
           bob: 1,
           al: [-6, 2],
           ar: [6, 1],
+          ...av,
         });
-      else drawHoriz(b, id, { x: 4, y: f === 2 ? 32 : 31, dirX: -1, tilt: f === 3 ? -1 : 0 });
+      else
+        drawHoriz(b, id, { x: 4, y: f === 2 ? 32 : 31, dirX: -1, tilt: f === 3 ? -1 : 0, ...av });
       break;
     }
     case 'casualty_death':
-      death(b, id, f);
+      death(b, id, f, away);
       break;
     case 'celebration': {
-      const j = [0, 2, 3, 1][f];
+      // Distinct pose per faction via a small pose table.
+      const C = {
+        boneyard_reapers: [
+          { bob: -3, al: [-6, -11], ar: [6, -11], ll: 3, rl: 3 },
+          { bob: -5, al: [-2, -13], ar: [2, -13], ll: 5, rl: 0 },
+          { bob: -3, al: [-6, -11], ar: [6, -11], ll: 3, rl: 3 },
+          { bob: 0, al: [-3, -9], ar: [3, -9], ll: 1, rl: 1 },
+        ],
+        rotting_deadskins: [
+          { bob: 0, al: [-4, 10], ar: [4, 10], ll: 1, rl: 1 },
+          { bob: 0, al: [-6, 12], ar: [6, 12], ll: 3, rl: 3 },
+          { bob: 0, al: [-4, 10], ar: [4, 10], ll: 1, rl: 1 },
+          { bob: 1, al: [-2, 7], ar: [2, 7], ll: 0, rl: 0 },
+        ],
+        transylvania_nightstalkers: [
+          { bob: -2, al: [-8, -8], ar: [4, -6], ll: 2, rl: 0 },
+          { bob: -4, al: [-9, -10], ar: [3, -8], ll: 4, rl: 0 },
+          { bob: -2, al: [-8, -8], ar: [4, -6], ll: 2, rl: 0 },
+          { bob: 0, al: [-5, -7], ar: [2, -5], ll: 1, rl: 0 },
+        ],
+        salem_bayou_ghouls: [
+          { bob: 0, al: [-5, 8], ar: [5, 8], ll: 0, rl: 2 },
+          { bob: 0, al: [-5, 6], ar: [5, 6], ll: 0, rl: 4 },
+          { bob: 0, al: [-5, 8], ar: [5, 8], ll: 0, rl: 2 },
+          { bob: 0, al: [-3, 5], ar: [3, 5], ll: 0, rl: 1 },
+        ],
+      };
+      const pose = (C[id] ?? C.salem_bayou_ghouls)[f % 4];
       drawUpright(b, id, {
-        bob: -j + 3 - 3,
         view: { kind: 'front', s: 0 },
-        al: [-5, f % 2 ? -12 : -9],
-        ar: [5, f % 2 ? -9 : -12],
-        ll: j,
-        rl: j ? 0 : 0,
+        ...pose,
+        ...av,
       });
       b.rect(
         10 + f * 8,
@@ -368,19 +582,26 @@ function drawFrame(id, anim, f, dirIdx = 0) {
   return b;
 }
 
-function death(b, id, f) {
-  const st = STYLE[id];
+function death(b, id, f, away = false) {
+  void id;
   if (f === 0) {
-    drawUpright(b, id, { view: { kind: 'side', s: 1 }, lean: -3, al: [-6, 2], ar: [6, 2] });
+    drawUpright(b, id, { view: { kind: 'side', s: 1 }, lean: -3, al: [-6, 2], ar: [6, 2], away });
     b.recolorSolid(M.BONE_WHITE);
     return;
   }
   if (f === 1) {
-    drawUpright(b, id, { view: { kind: 'side', s: 1 }, lean: -5, bob: 3, al: [-7, 0], ar: [7, 0] });
+    drawUpright(b, id, {
+      view: { kind: 'side', s: 1 },
+      lean: -5,
+      bob: 3,
+      al: [-7, 0],
+      ar: [7, 0],
+      away,
+    });
     return;
   }
   if (f === 2) {
-    drawHoriz(b, id, { x: 4, y: 33, dirX: -1 });
+    drawHoriz(b, id, { x: 4, y: 33, dirX: -1, away });
     return;
   }
   const t = f - 3; // 0..2
@@ -425,12 +646,11 @@ function death(b, id, f) {
     b.ell(24, 22 + up, 3, 3, M.SPECTRAL_CYAN);
     b.px(24, 18 + up, M.BONE_WHITE);
   }
-  void st;
 }
 
 // ---- crests ------------------------------------------------------------------------------------
 function crest(id) {
-  const st = STYLE[id];
+  void STYLE[id];
   const b = new Buf(64, 64);
   const col = {
     boneyard_reapers: [F.OBSIDIAN_PURPLE, M.BONE_WHITE],
@@ -484,7 +704,6 @@ function crest(id) {
     b.rect(24, 8, 16, 4, M.HEX_PURPLE);
     b.rect(28, 4, 8, 4, M.HEX_PURPLE);
   }
-  void st;
   return b;
 }
 
@@ -769,14 +988,26 @@ async function sheet(path, cols, rows, cw, ch, frames, opts) {
 async function main() {
   const layout = [];
   for (const id of S.SPRITE_SHEETS) {
-    const frames = [];
-    let row = 0;
-    for (const a of S.ANIMATIONS) {
-      for (let r = 0; r < a.rows; r++, row++)
-        for (let f = 0; f < a.frames; f++)
-          frames.push({ col: f, row, buf: drawFrame(id, a.name, f, r) });
+    for (const away of [false, S.AWAY_SHEETS.includes(id) ? true : null]) {
+      if (away === null) continue;
+      const name = away ? `${id}-away` : id;
+      const frames = [];
+      let row = 0;
+      for (const a of S.ANIMATIONS) {
+        for (let r = 0; r < a.rows; r++, row++)
+          for (let f = 0; f < a.frames; f++)
+            frames.push({ col: f, row, buf: drawFrame(id, a.name, f, r, away) });
+      }
+      await sheet(
+        join(OUT, 'sprites', `${name}.png`),
+        S.SHEET_COLS,
+        S.SHEET_ROWS,
+        48,
+        48,
+        frames,
+        {},
+      );
     }
-    await sheet(join(OUT, 'sprites', `${id}.png`), S.SHEET_COLS, S.SHEET_ROWS, 48, 48, frames, {});
   }
   let row = 0;
   for (const a of S.ANIMATIONS) {
@@ -844,6 +1075,7 @@ async function main() {
           animations: layout,
           run_8dir_order: ['S', 'SE', 'E', 'NE', 'N', 'NW', 'W', 'SW'],
           sheets: S.SPRITE_SHEETS,
+          away_sheets: S.AWAY_SHEETS,
           crests: S.CREST_FACTIONS,
         },
         portraits: { cell: 64, frames: 2, ids: S.PORTRAITS },
@@ -855,4 +1087,5 @@ async function main() {
   );
   console.log('generated assets in public/assets');
 }
-await main();
+
+if (import.meta.url === `file://${process.argv[1]}`) await main();

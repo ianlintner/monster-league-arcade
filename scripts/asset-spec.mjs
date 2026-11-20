@@ -6,6 +6,8 @@ export const FACTIONS = [
   'salem_bayou_ghouls',
 ];
 export const SPRITE_SHEETS = [...FACTIONS, 'necro_ref', 'demon_ref'];
+/** Factions get a dedicated "away" jersey palette sheet; refs wear one neutral kit. */
+export const AWAY_SHEETS = FACTIONS;
 export const CREST_FACTIONS = FACTIONS;
 export const PORTRAITS = [
   'coach_boneyard_reapers',

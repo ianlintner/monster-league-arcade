@@ -65,6 +65,12 @@
       "necro_ref",
       "demon_ref"
     ],
+    "away_sheets": [
+      "boneyard_reapers",
+      "rotting_deadskins",
+      "transylvania_nightstalkers",
+      "salem_bayou_ghouls"
+    ],
     "crests": [
       "boneyard_reapers",
       "rotting_deadskins",

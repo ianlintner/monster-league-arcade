@@ -10,3 +10,7 @@ test-results/
 .asset-manifest.json
 *.log
 .DS_Store
+# fal generation staging temp files (written to CWD by scripts/generate-images.mjs)
+.cache-*
+.single-*
+.cell-*
