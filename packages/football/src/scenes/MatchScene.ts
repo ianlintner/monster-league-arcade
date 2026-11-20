@@ -344,6 +344,11 @@ export class MatchScene extends Phaser.Scene {
     this.liveResult = null;
     this.highlightDefender = -1;
     this.simAccumulator = 0;
+    // Entering the live down is part of building it: both the KeyC pre-snap path
+    // and the e2e debug handle call `beginLivePlay()` directly, and both must land
+    // in LIVE with a populated `this.live` (otherwise `updateLive` early-returns
+    // forever and the whistle never fires).
+    this.mode = 'LIVE';
   }
 
   // ------------------------------------------------------------- live loop
@@ -1353,7 +1358,9 @@ export class MatchScene extends Phaser.Scene {
         this.confirmPlay(this.selectedPlayIndex);
       },
       snap: () => {
-        if (this.mode === 'PRE_SNAP') this.mode = 'LIVE';
+        // Build the live play *and* enter LIVE, matching the on-screen flow; a bare
+        // mode flip leaves `this.live` null so the down can never run to the whistle.
+        if (this.mode === 'PRE_SNAP') this.beginLivePlay();
       },
       openWindows: () => {
         if (this.mode === 'LIVE' && this.isPassPlay) this.windowsOpen = true;
