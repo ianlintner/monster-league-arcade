@@ -59,16 +59,30 @@ export function resolvePassAttempt(attempt: PassAttempt, target: 'A' | 'B' | 'C'
     attempt.defenders.map((d) => ({ id: d.id, x: d.x, y: d.y, side: 'DEFENSE' as const })),
   );
 
+  // Downfield yardage physically resolved on the field (x is downfield from the
+  // LOS), so the sim uses the actual catch/interception spot rather than rolling
+  // random air yardage from the playbook.
+  const yards = Math.round(attempt.toX - attempt.fromX);
+
   switch (resolution.kind) {
     case 'INTERCEPTION':
-      return { target, force: { complete: false, intercepted: true, sacked: false } };
+      return {
+        target,
+        force: { complete: false, intercepted: true, sacked: false, yards },
+      };
     case 'DEFLECTION':
       // A deflection breaks up the catch. Deterministic by design (no RNG):
       // a deflection always results in an incompletion in this scope.
-      return { target, force: { complete: false, intercepted: false, sacked: false } };
+      return {
+        target,
+        force: { complete: false, intercepted: false, sacked: false, yards },
+      };
     default:
       // CLEAN_CATCH (or INCOMPLETE, which resolvePass never returns here).
-      return { target, force: { complete: true, intercepted: false, sacked: false } };
+      return {
+        target,
+        force: { complete: true, intercepted: false, sacked: false, yards },
+      };
   }
 }
 
@@ -90,11 +104,19 @@ export function resolveTackleAttempt(
       chasers: attempt.chasers,
       seed,
     });
-    // The sim only needs `fumble: true`; the recovery flips possession on its
-    // own (defense recovery = turnover).
-    if (fumble.turnover || fumble.recoveredBy !== null) {
+    if (fumble.recoveredBy === null) {
+      // Ball rolls dead: neither side takes it; treat as a normal tackle, no
+      // forced fumble (possession is unchanged).
+      return { force: { tackleDamage: attempt.damage } };
+    }
+    if (fumble.turnover) {
+      // Defense recovered: a real turnover, so force the fumble (the sim treats
+      // an explicit fumble as lost and flips possession).
       return { force: { fumble: true, tackleDamage: attempt.damage } };
     }
+    // Offense recovered its own fumble: the ball stays with the offense. A fumble
+    // did occur, but the down continues; do NOT force it as lost to the defense.
+    return { force: { tackleDamage: attempt.damage } };
   }
   return { force: { tackleDamage: attempt.damage } };
 }

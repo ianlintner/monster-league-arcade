@@ -59,10 +59,21 @@ describe('Ballistics pass resolution', () => {
     const mid = sampleFlight(flight, flight.flightTime / 2);
     const fringe = PASS_TUNING.deflectionRadius * 0.9;
     const res = resolvePass(flight, [
-      { id: 'away-DB2', x: mid.x + fringe, y: mid.y, side: 'DEFENSE' },
+      // Perpendicular offset (along y) from a point on the flight line, not farther
+      // along the path, so the fringe distance is genuinely lateral to the throw.
+      { id: 'away-DB2', x: mid.x, y: mid.y + fringe, side: 'DEFENSE' },
     ]);
     expect(res.kind).toBe('DEFLECTION');
     expect(res.defenderId).toBe('away-DB2');
+  });
+
+  it('intercepts a defender directly on the line away from start/mid/end', () => {
+    // A 30-yard throw: a defender at x=7.5 (a quarter of the way) is ~7.5 yd from
+    // every sampled point under the old model but lies exactly on the segment.
+    const flight = buildFlight({ from: { x: 0, y: 0 }, to: { x: 30, y: 0 }, style: 'BULLET' });
+    const res = resolvePass(flight, [{ id: 'away-DB3', x: 7.5, y: 0, side: 'DEFENSE' }]);
+    expect(res.kind).toBe('INTERCEPTION');
+    expect(res.defenderId).toBe('away-DB3');
   });
 
   it('exposes the required tuning constants', () => {

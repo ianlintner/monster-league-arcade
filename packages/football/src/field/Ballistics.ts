@@ -116,15 +116,40 @@ export const PASS_TUNING = {
   bulletHoldMs: 180,
 } as const;
 
+/** Point-to-segment squared distance from `p` to the segment `a`→`b`. */
+function pointSegmentDist2(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): number {
+  const abx = bx - ax;
+  const aby = by - ay;
+  const len2 = abx * abx + aby * aby;
+  // Degenerate segment: distance to the single point.
+  if (len2 === 0) {
+    const dx = px - ax;
+    const dy = py - ay;
+    return dx * dx + dy * dy;
+  }
+  const t = Math.max(0, Math.min(1, ((px - ax) * abx + (py - ay) * aby) / len2));
+  const cx = ax + abx * t;
+  const cy = ay + aby * t;
+  const dx = px - cx;
+  const dy = py - cy;
+  return dx * dx + dy * dy;
+}
+
 export function resolvePass(flight: BallInFlight, defenders: DeflectorSpec[]): PassResolution {
-  // Sample the ball's path midpoint (worst-case for a defender lurking on the line).
-  const mid = sampleFlight(flight, flight.flightTime / 2);
+  // Distance to the entire start→target segment, so a defender anywhere along
+  // the 30-yard flight line is detected (not just at start/mid/end).
   let best: { id: string; d: number } | null = null;
   for (const d of defenders) {
-    const dmid = Math.hypot(d.x - mid.x, d.y - mid.y);
-    const dstart = Math.hypot(d.x - flight.sx, d.y - flight.sy);
-    const dend = Math.hypot(d.x - flight.tx, d.y - flight.ty);
-    const dNear = Math.min(dmid, dstart, dend);
+    const dNear = Math.sqrt(
+      pointSegmentDist2(d.x, d.y, flight.sx, flight.sy, flight.tx, flight.ty),
+    );
     if (!best || dNear < best.d) best = { id: d.id, d: dNear };
   }
   if (!best) return { kind: 'CLEAN_CATCH', defenderId: null };

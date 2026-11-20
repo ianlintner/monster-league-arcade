@@ -83,6 +83,9 @@ export class HazardManager {
   private elapsed = 0;
   /** Fractional poison (sludge) DoT not yet quantized to a full HP, per hazard. */
   private dotAcc = new Map<string, number>();
+  /** Victims already claimed by a lethal hazard, so a repeat evaluation (while the
+   *  carrier lingers inside an open grave) cannot cascade into a carnage forfeit. */
+  private claimed = new Map<string, Set<string>>();
 
   constructor(arena: ArenaId, seed: number) {
     this.arena = arena;
@@ -257,14 +260,18 @@ export class HazardManager {
           inf.frictionMult = Math.min(inf.frictionMult, 0.05);
           break;
         case 'OPEN_GRAVE':
-          // Instant casualty: a single lethal hit. Falling in is a death sentence.
-          inf.hits.push({
-            team: actor.team,
-            side: actor.side,
-            slot: actor.slot,
-            amount: h.damage,
-            source: h.source,
-          });
+          // Instant casualty: a single lethal hit. A victim already claimed by this
+          // grave is skipped so a lingering carrier cannot be re-killed (each
+          // lethal hit would auto-substitute a reserve and eventually forfeit).
+          if (this.claimVictim(h.id, actor)) {
+            inf.hits.push({
+              team: actor.team,
+              side: actor.side,
+              slot: actor.slot,
+              amount: h.damage,
+              source: h.source,
+            });
+          }
           break;
         case 'MINE':
           // A dive clears it safely; otherwise it detonates.
@@ -330,6 +337,19 @@ export class HazardManager {
   isCleared(id: string): boolean {
     const h = this.hazards.find((x) => x.id === id);
     return h ? !h.armed : true;
+  }
+
+  /** Claim a victim once per hazard; returns true only the first time. */
+  private claimVictim(hazardId: string, actor: { slot: Slot }): boolean {
+    const key = `${actor.slot}`;
+    let set = this.claimed.get(hazardId);
+    if (!set) {
+      set = new Set();
+      this.claimed.set(hazardId, set);
+    }
+    if (set.has(key)) return false;
+    set.add(key);
+    return true;
   }
 
   /** Snapshot for the renderer (positions, kinds, telegraph/arm state). */

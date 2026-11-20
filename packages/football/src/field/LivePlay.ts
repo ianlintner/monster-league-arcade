@@ -65,6 +65,12 @@ export interface LivePlayCommand {
   steerY: number;
   dive?: boolean;
   turbo?: boolean;
+  /** 0..1 terrain friction from hazards (bog/tombstones) applied this tick. */
+  frictionMult?: number;
+  /** 0..1 terrain slow from hazards (sludge) applied this tick. */
+  slowMult?: number;
+  /** Carrier speed multiplier from Bat-Wing Jet Boost (nasty effect) this tick. */
+  speedMult?: number;
 }
 
 export interface LiveActorState {
@@ -178,6 +184,9 @@ export class LivePlay {
     kind: 'TACKLE' | 'OUT_OF_BOUNDS' | 'SCORE';
     tackler: string | null;
   } | null = null;
+  private frictionMult = 1;
+  private slowMult = 1;
+  private speedMult = 1;
 
   constructor(input: LivePlayInput) {
     this.input = input;
@@ -221,6 +230,11 @@ export class LivePlay {
     // lost to a later `dive: false` before the next `advance()` consumes it.
     if (cmd.dive) this.diveHeld = true;
     this.turboHeld = cmd.turbo ?? false;
+    // Terrain modifiers (bog/tombstone friction, sludge slow) applied to the
+    // carrier's next movement step; reset each command to avoid stale values.
+    this.frictionMult = cmd.frictionMult ?? 1;
+    this.slowMult = cmd.slowMult ?? 1;
+    this.speedMult = cmd.speedMult ?? 1;
   }
 
   /** Advance one fixed 60 Hz tick with the last-commanded control state. */
@@ -289,9 +303,10 @@ export class LivePlay {
     const tx = target.x;
     const ty = target.y;
 
-    // Turbo increases top speed but drains stamina; no stamina = no turbo.
+    // Turbo increases top speed but drains stamina; no stamina = no turbo. The
+    // Bat-Wing Jet Boost nasty stacks multiplicatively on top via `this.speedMult`.
     const canTurbo = turbo && c.stamina > 0;
-    const speedMult = canTurbo ? LIVE_TUNING.turboSpeedMult : 1;
+    const speedMult = (canTurbo ? LIVE_TUNING.turboSpeedMult : 1) * this.speedMult;
     if (canTurbo) c.stamina = clamp(c.stamina - LIVE_TUNING.dt / LIVE_TUNING.turboMaxSeconds, 0, 1);
     else if (!turbo)
       // Regen only when the player is not holding turbo at all; holding it with an
@@ -306,6 +321,13 @@ export class LivePlay {
     const k = 1 - Math.exp(-LIVE_TUNING.dt / LIVE_TUNING.accelTimeSeconds);
     c.vx += (desiredVx - c.vx) * k;
     c.vy += (desiredVy - c.vy) * k;
+
+    // Terrain modifiers from hazards this tick: friction bleeds speed (bog,
+    // tombstones), slow caps it (sludge). Applied before position integration so
+    // the current graveyard's tombstones and the swamp's sludge/bog actually move
+    // the carrier as the field effects advertise.
+    c.vx *= this.frictionMult * this.slowMult;
+    c.vy *= this.frictionMult * this.slowMult;
 
     // Hard cut: a large heading change bleeds ~30% speed — but only once per turn,
     // not on every tick while the velocity catches up to the new heading.
@@ -389,7 +411,7 @@ export class LivePlay {
       if (a.downed || a === carrier) continue;
       const spec = this.input.actors.find((s) => s.id === a.id)!;
 
-// A defender in contact with a blocker is engaged: the blocker stalls the
+      // A defender in contact with a blocker is engaged: the blocker stalls the
       // pursuit so the offensive line provides real protection on run plays.
       a.engaged = false;
       if (a.side === 'DEFENSE') {
@@ -405,15 +427,16 @@ export class LivePlay {
       // Non-carrier offense follows its scripted route (receivers run routes);
       // defense pursues the carrier; blockers with no route drift downfield.
       const route = this.input.routes?.[a.id];
-      const routePoint = route ? this.routeHeading(a, route) : null;
+      const routeDir = route ? this.routeHeading(a, route) : null;
+      // `routeHeading` already returns a *unit direction*; use it directly for
+      // offensive AI (do not subtract the actor's position again — that reverses
+      // receivers). Defense pursues the carrier's actual position.
+      const dirX = a.side === 'DEFENSE' ? carrier.x - a.x : routeDir ? routeDir.x : 2;
+      const dirY = a.side === 'DEFENSE' ? carrier.y - a.y : routeDir ? routeDir.y : 0;
       const engagedDamp = a.engaged ? 0.1 : 1; // engaged defenders crawl, not run
-      const targetX = a.side === 'DEFENSE' ? carrier.x : routePoint ? routePoint.x : a.x + 2;
-      const targetY = a.side === 'DEFENSE' ? carrier.y : routePoint ? routePoint.y : a.y;
-      const dx = targetX - a.x;
-      const dy = targetY - a.y;
-      const m = Math.hypot(dx, dy) || 1;
-      const desiredVx = (dx / m) * spec.topSpeed * engagedDamp;
-      const desiredVy = (dy / m) * spec.topSpeed * engagedDamp;
+      const m = Math.hypot(dirX, dirY) || 1;
+      const desiredVx = (dirX / m) * spec.topSpeed * engagedDamp;
+      const desiredVy = (dirY / m) * spec.topSpeed * engagedDamp;
       const k = 1 - Math.exp(-LIVE_TUNING.dt / LIVE_TUNING.accelTimeSeconds);
       a.vx += (desiredVx - a.vx) * k;
       a.vy += (desiredVy - a.vy) * k;

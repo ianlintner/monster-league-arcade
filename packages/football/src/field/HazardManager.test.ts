@@ -31,6 +31,18 @@ describe('HazardManager — graveyard', () => {
     expect(inf.hits[0]!.amount).toBeGreaterThanOrEqual(999);
   });
 
+  it('open grave emits only one lethal hit per victim', () => {
+    const m = new HazardManager('cursed-graveyard', 7);
+    const grave = m.hazards.find((h) => h.kind === 'OPEN_GRAVE')!;
+    const actor = ACTOR();
+    // First evaluation claims the victim.
+    expect(m.evaluate(grave.x, grave.y, actor, false, 1 / 60).hits.length).toBe(1);
+    // Repeat evaluations while the carrier lingers inside must NOT re-kill.
+    for (let i = 0; i < 4; i++) {
+      expect(m.evaluate(grave.x, grave.y, actor, false, 1 / 60).hits).toEqual([]);
+    }
+  });
+
   it('mine detonates unless cleared by a dive', () => {
     const m = new HazardManager('cursed-graveyard', 7);
     const mine = m.hazards.find((h) => h.kind === 'MINE')!;

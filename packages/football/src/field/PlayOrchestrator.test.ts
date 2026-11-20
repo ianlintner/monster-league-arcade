@@ -16,6 +16,7 @@ describe('PlayOrchestrator — pass resolution', () => {
     expect(snap.target).toBe('A');
     expect(snap.force?.complete).toBe(true);
     expect(snap.force?.intercepted).toBe(false);
+    expect(snap.force?.yards).toBe(12);
   });
 
   it('a defender on the flight line intercepts', () => {
@@ -65,9 +66,10 @@ describe('PlayOrchestrator — tackle resolution', () => {
       {
         ...base,
         bigHit: true,
+        // Defense (away) reaches the ball first: a real turnover fumble.
         chasers: [
-          { team: 'home', speed: 9, distance: 1 },
-          { team: 'away', speed: 7, distance: 1 },
+          { team: 'away', speed: 9, distance: 1 },
+          { team: 'home', speed: 7, distance: 1 },
         ],
       },
       'home',
@@ -80,5 +82,40 @@ describe('PlayOrchestrator — tackle resolution', () => {
   it('a big hit with no chasers does not fumble', () => {
     const snap = resolveTackleAttempt({ ...base, bigHit: true }, 'home', 5);
     expect(snap.force?.fumble).toBeUndefined();
+  });
+
+  it('an offensive recovery does not force a lost fumble', () => {
+    // Offense ('home') is nearest/fastest: recoveredBy = offense, turnover=false.
+    // The ball stays with the offense; the sim must NOT be told it was lost.
+    const snap = resolveTackleAttempt(
+      {
+        ...base,
+        bigHit: true,
+        chasers: [
+          { team: 'home', speed: 9, distance: 1 },
+          { team: 'away', speed: 7, distance: 5 },
+        ],
+      },
+      'home',
+      5,
+    );
+    expect(snap.force?.fumble).toBeUndefined();
+    expect(snap.force?.tackleDamage).toBe(8);
+  });
+
+  it('a defensive recovery forces a lost fumble', () => {
+    const snap = resolveTackleAttempt(
+      {
+        ...base,
+        bigHit: true,
+        chasers: [
+          { team: 'away', speed: 9, distance: 1 },
+          { team: 'home', speed: 7, distance: 5 },
+        ],
+      },
+      'home',
+      5,
+    );
+    expect(snap.force?.fumble).toBe(true);
   });
 });

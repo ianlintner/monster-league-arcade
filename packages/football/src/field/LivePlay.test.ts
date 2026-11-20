@@ -115,6 +115,16 @@ describe('LivePlay resolution', () => {
     expect(lp.carrier.x).toBeGreaterThan(0);
     expect(lp.result().yards).toBeGreaterThan(0);
   });
+
+  it('whistles for a score at the snap-relative goal line, not x=100', () => {
+    // Ball on the opponent's 5: `los = 95` puts the attacking goal line at
+    // `x = 100 - los = 5`, so crossing x=5 scores instead of running to x=100.
+    const lp = new LivePlay(makeInput({ los: 95 }));
+    lp.command({ steerX: 1, steerY: 0 });
+    lp.run();
+    expect(lp.result().touchdown).toBe(true);
+    expect(lp.result().finalX).toBeLessThan(10);
+  });
 });
 
 describe('LivePlay determinism', () => {
