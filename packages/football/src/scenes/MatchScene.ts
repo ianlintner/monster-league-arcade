@@ -1262,13 +1262,16 @@ export class MatchScene extends Phaser.Scene {
     // and a hair of padding — so the crossing line is masked around the whole
     // number, not just the lit cells. VOID_BLACK is the outline colour, so the
     // panel reads as the number's dark plaque rather than a stray turf patch.
+    // Each digit occupies five glyph rows vertically (`y0 + row * ch`), so the
+    // panel must be `5 * ch` tall to cover the lower rows' glyph gaps — not `ch`,
+    // which masks only the top row and lets the minor line peek through below.
     const pad = Math.max(1, Math.round(s * 2));
     g.fillStyle(toPhaserColor('VOID_BLACK'), 1);
     g.fillRect(
       xBase - outline - pad,
       y0 - outline - pad,
       total + (outline + pad) * 2,
-      ch + (outline + pad) * 2,
+      5 * ch + (outline + pad) * 2,
     );
     const draw = (color: number, alpha: number, inset: number) => {
       g.fillStyle(color, alpha);
