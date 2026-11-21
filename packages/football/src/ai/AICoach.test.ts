@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { decideCoachPlay, aiPlaybookSize } from './AICoach';
 import type { CoachSituation } from './AICoach';
+import { getOffensePlay } from '../sim/Playbook';
 import { ALL_NASTIES } from '../sim/DirtyTricks';
 
 function sit(over: Partial<CoachSituation> = {}): CoachSituation {
@@ -83,20 +84,7 @@ describe('AICoach nasty & ref reactions', () => {
 });
 
 function getKind(id: string): string {
-  // Local mirror of getOffensePlay(id).kind to keep the assertion independent of
-  // importing the full playbook type; the decision already validated ids are real.
-  if (/^(PUNT)$/.test(id)) return 'PUNT';
-  if (/^(FIELD_GOAL)$/.test(id)) return 'FIELD_GOAL';
-  const runs = [
-    'INSIDE_GORE_RUN',
-    'COFFIN_SWEEP',
-    'OPTION_PITCH',
-    'DRAW_OF_DOOM',
-    'SPECTER_SNEAK',
-    'TOMBSTONE_PLUNGE',
-  ];
-  const passes = ['QUICK_SLANTS', 'POST_CORNER', 'DEEP_CROSS', 'SCREEN_TRAP'];
-  if (runs.includes(id)) return 'RUN';
-  if (passes.includes(id)) return 'PASS';
-  return id;
+  // Use the playbook's own kind lookup so the assertion stays in sync with the
+  // real play definitions rather than a hand-maintained mirror.
+  return getOffensePlay(id).kind;
 }

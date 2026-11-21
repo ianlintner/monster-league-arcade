@@ -36,6 +36,7 @@ export interface CoachSituation {
 
 /** A single decision: the offense play, defense play, and an optional armed nasty. */
 export interface CoachDecision {
+  /** Offense play id; empty string when the AI is on defense (it calls no offense play). */
   offensePlayId: string;
   defensePlayId: string;
   /** Nasty to arm this snap (before the AI snaps); null when it holds its powder. */
@@ -182,11 +183,11 @@ function chooseNasty(s: CoachSituation, offenseIsRun: boolean): NastyKind | null
  * what the scene then feeds to `session.selectPlays(...)` (+ `callNasty(...)`).
  */
 export function decideCoachPlay(s: CoachSituation): CoachDecision {
-  const offensePlayId = s.aiIsOffense
-    ? chooseOffensePlay(s)
-    : // When the AI defends, the *offense* play is the opponent's; the AI chooses
-      // a counter based on its read of down/distance rather than a placeholder.
-      'INSIDE_GORE_RUN';
+  // When the AI defends, it does not call an offense play of its own — the
+  // opponent's offense is already selected. The decision's `offensePlayId` is
+  // therefore only meaningful on offense; on defense it is left empty and the
+  // reason text reflects the defensive read instead of a placeholder play.
+  const offensePlayId = s.aiIsOffense ? chooseOffensePlay(s) : '';
   // Whether the upcoming snap is a run, from the AI's perspective:
   //  - on offense: from the play it actually called,
   //  - on defense: a situational guess (short yardage or goal line ⇒ likely run).
@@ -200,13 +201,15 @@ export function decideCoachPlay(s: CoachSituation): CoachDecision {
     `down ${s.down} & ${s.yardsToGo}`,
     s.aiIsOffense ? 'on offense' : 'on defense',
     nasty ? `arms ${nasty}` : 'no nasty',
-    `(${getOffensePlay(offensePlayId).name} vs ${getDefensePlay(defensePlayId).name})`,
+    s.aiIsOffense
+      ? `(${getOffensePlay(offensePlayId).name} vs ${getDefensePlay(defensePlayId).name})`
+      : `(reads ${offenseIsRun ? 'run' : 'pass'}; counters ${getDefensePlay(defensePlayId).name})`,
   ].join(' ');
 
   return { offensePlayId, defensePlayId, nasty, reason };
 }
 
-/** Total defense plays available (AI breadth sanity check). */
+/** Total offense + defense plays available (AI breadth sanity check). */
 export function aiPlaybookSize(): number {
   return Object.keys(OFFENSE_PLAYS).length + Object.keys(DEFENSE_PLAYS).length;
 }

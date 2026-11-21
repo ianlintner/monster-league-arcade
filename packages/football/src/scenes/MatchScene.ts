@@ -12,6 +12,7 @@
 import * as Phaser from 'phaser';
 import {
   HALLOWEEN_MIDNIGHT_PALETTE as P,
+  type FactionId,
   projectToScreen,
   toPhaserColor,
 } from '@monster-league/shared-core';
@@ -30,7 +31,9 @@ import {
   buildBroadcastBanner,
   buildHuddleOverlay,
   downDistanceLabel,
+  factionName,
   formatClock,
+  losLabel,
   type BannerKind,
 } from '../ui/hud';
 import {
@@ -83,6 +86,8 @@ function detailForKind(kind: BannerKind, raw: string): string {
     case 'FORFEIT':
       return raw.replace(/^FORFEIT BY CARNAGE[!]?\s*/, '');
     case 'CASUALTY':
+      return raw;
+    case 'NEUTRAL':
       return raw;
   }
 }
@@ -137,13 +142,15 @@ export class MatchScene extends Phaser.Scene {
   private mode: 'PICK' | 'PRE_SNAP' | 'LIVE' | 'BANNER' = 'PICK';
   private selectedPlayIndex = 0;
   private bannerText = '';
-  private bannerKind: BannerKind = 'CASUALTY';
+  private bannerKind: BannerKind = 'NEUTRAL';
   private bannerTimer = 0;
   /** Set once the session reaches GAME_OVER; disables play selection + dismiss. */
   private gameOver = false;
   private highlightDefender = -1;
   private inputPollTimer = 0;
   private steer = { x: 0, y: 0 };
+  /** Fingerprint of the last huddle overlay build; skips redundant DOM rebuilds. */
+  private huddleFingerprint = '';
 
   private fieldGfx!: Phaser.GameObjects.Graphics;
   private indicatorGfx!: Phaser.GameObjects.Graphics;
@@ -1966,16 +1973,23 @@ export class MatchScene extends Phaser.Scene {
     const down = root.querySelector('.gsn-scorebug__down');
     if (down) down.textContent = downDistanceLabel(s.down, s.yardsToGo);
     const los = root.querySelector('.gsn-scorebug__los');
-    if (los)
-      los.textContent = `BALL ON ${s.possession === 'home' ? 'OPP' : 'OWN'} ${
-        s.possession === 'home' ? 100 - s.los : s.los
-      }`;
+    if (los) los.textContent = losLabel(s.los, s.possession);
 
-    // Bribed-ref badge.
+    // Bribed-ref badge (text + active flag, so a change of briber re-syncs the label).
     const bribe = root.querySelector('[data-testid="bribe-badge"]');
     if (bribe) {
       const bribed = s.ref.isBribed ? s.ref.bribedBy : null;
       bribe.setAttribute('data-active', String(bribed !== null));
+      if (bribed) {
+        // `roster[x].faction` is the Roster's uppercase Faction enum; the shared
+        // `factionName`/FACTIONS lookup key is the lowercase `FactionId`.
+        const id = (f: string): FactionId => f.toLowerCase() as FactionId;
+        const briber = id(s.roster[bribed].faction);
+        const victim = id(s.roster[bribed === 'home' ? 'away' : 'home'].faction);
+        bribe.textContent = `BRIBED REF · ${factionName(briber)} paid · flags ${factionName(victim)}`;
+      } else {
+        bribe.textContent = '';
+      }
     }
   }
 
@@ -1990,6 +2004,7 @@ export class MatchScene extends Phaser.Scene {
     if (this.mode !== 'PICK') {
       host.replaceChildren();
       host.hidden = true;
+      this.huddleFingerprint = '';
       return;
     }
     const cat = catalogForDown(this.session.down);
@@ -1999,11 +2014,20 @@ export class MatchScene extends Phaser.Scene {
       kind: p.kind,
       formation: p.kind === 'PASS' ? 'SHOTGUN' : 'I-FORM',
     }));
-    const formations = [...new Set(plays.map((p) => p.formation))];
     const availableNasties = this.session.charges.remaining(
       this.session.possession,
       this.session.half,
     );
+    const formations = [...new Set(plays.map((p) => p.formation))];
+    const fingerprint = JSON.stringify({
+      down: this.session.down,
+      plays: cat.map((p) => p.id),
+      formations,
+      nasties: availableNasties,
+    });
+    if (fingerprint === this.huddleFingerprint) return; // nothing changed this frame
+    this.huddleFingerprint = fingerprint;
+
     host.replaceChildren(buildHuddleOverlay({ formations, plays, availableNasties }));
     host.hidden = false;
   }
@@ -2027,6 +2051,10 @@ export class MatchScene extends Phaser.Scene {
     const spriteBackedActors = () => this.spriteBackedActorCount;
     const bannerKind = () => this.bannerKind;
     const aiDecision = () => {
+      // Debug probe only: "what would the AI coach call for the team currently in
+      // possession on offense?" This is NOT live gameplay wiring — the human
+      // offense still calls its own play via `selectPlays`, and no `callNasty` is
+      // driven from here. Wiring a 1P-vs-AI opponent loop is deferred (see PR note).
       const s = this.session;
       if (!s) return null;
       const team = s.possession;

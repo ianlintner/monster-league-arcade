@@ -87,13 +87,20 @@ export function createMonsterBowl(seeds: TeamSeed[]): MonsterBowl {
   };
 }
 
-/** Record a semifinal result and place the winner into the championship slot. */
+/**
+ * Record a semifinal result and place the winner into the championship slot.
+ * Ties are broken in favour of the home team (the higher seed in each pairing).
+ * Re-recording a slot that already has a winner is a no-op that returns the
+ * existing winner, so a stray duplicate result cannot silently overwrite it.
+ */
 export function recordSemifinal(
   bowl: MonsterBowl,
   slot: Exclude<BracketSlotId, 'championship'>,
   homeScore: number,
   awayScore: number,
 ): BracketTeam {
+  const existing = bowl.winners[slot];
+  if (existing) return existing;
   const [home, away] = bowl.semifinals[slot === 'semi-1' ? 0 : 1]!;
   const winner = homeScore >= awayScore ? home : away;
   bowl.winners[slot] = winner;
@@ -108,7 +115,11 @@ export function championshipMatchup(bowl: MonsterBowl): [BracketTeam, BracketTea
   return [a, b];
 }
 
-/** Record the championship result and crown the Monster Bowl champion. */
+/**
+ * Record the championship result and crown the Monster Bowl champion. Ties are
+ * broken in favour of the home team (the semi-1 winner). Returns null when the
+ * championship matchup is not yet resolved.
+ */
 export function crownChampion(
   bowl: MonsterBowl,
   homeScore: number,
@@ -142,6 +153,7 @@ export function isComplete(bowl: MonsterBowl): boolean {
 
 /** Render an ordered list of bracket rows for the broadcast overlay. */
 export function bracketRows(bowl: MonsterBowl): { slot: BracketSlotId; text: string }[] {
+  const championship = championshipMatchup(bowl);
   return [
     ...bowl.semifinals.map(([home, away], i) => ({
       slot: (i === 0 ? 'semi-1' : 'semi-2') as BracketSlotId,
@@ -149,9 +161,7 @@ export function bracketRows(bowl: MonsterBowl): { slot: BracketSlotId; text: str
     })),
     {
       slot: 'championship',
-      text: championshipMatchup(bowl)
-        ? `${championshipMatchup(bowl)![0].name} vs ${championshipMatchup(bowl)![1].name}`
-        : 'TBD vs TBD',
+      text: championship ? `${championship[0].name} vs ${championship[1].name}` : 'TBD vs TBD',
     },
   ];
 }

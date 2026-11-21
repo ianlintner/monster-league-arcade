@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CARNAGE_LIMIT } from '../sim/Roster';
 import {
+  bannerKindForText,
   buildBroadcastBanner,
   buildControlsBar,
   buildHuddleOverlay,
@@ -99,6 +100,34 @@ describe('Broadcast banners', () => {
     const el = buildBroadcastBanner(kind, 'detail');
     expect(el.getAttribute('data-kind')).toBe(kind);
     expect(el.querySelector('.gsn-banner__head')?.textContent).toBe(title);
+  });
+
+  it('classifies every GameSession.bannerFor() line without mislabelling ordinary plays', () => {
+    // The exact literal strings `GameSession.bannerFor()` can return (see
+    // GameSession.ts:900-911). None of the ordinary/scoring lines may fall through
+    // to the casualty headline "PLAYER LIQUIDATED!".
+    const cases: [string, string][] = [
+      ['TOUCHDOWN!', 'TOUCHDOWN'],
+      ['SAFETY!', 'NEUTRAL'],
+      ['FIELD GOAL IS GOOD!', 'NEUTRAL'],
+      ['FIELD GOAL NO GOOD', 'NEUTRAL'],
+      ['PUNT — TOUCHBACK', 'NEUTRAL'],
+      ['PUNT', 'NEUTRAL'],
+      ['INTERCEPTED!', 'TURNOVER'],
+      ['FUMBLE LOST!', 'FUMBLE'],
+      ['TURNOVER ON DOWNS', 'TURNOVER'],
+      ['SACKED!', 'NEUTRAL'],
+      ['INCOMPLETE', 'NEUTRAL'],
+      ['FIRST DOWN!', 'NEUTRAL'],
+      ['+7 YARDS', 'NEUTRAL'],
+      ['-3 YARDS', 'NEUTRAL'],
+      ['PLAYER LIQUIDATED!', 'CASUALTY'],
+      ['REF LIQUIDATED!', 'REF_LIQUIDATED'],
+      ['FORFEIT BY CARNAGE! HOME wins!', 'FORFEIT'],
+    ];
+    for (const [text, expected] of cases) {
+      expect(bannerKindForText(text), `"${text}"`).toBe(expected);
+    }
   });
 });
 

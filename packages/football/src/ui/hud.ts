@@ -207,7 +207,8 @@ export type BannerKind =
   | 'PENALTY'
   | 'CASUALTY'
   | 'REF_LIQUIDATED'
-  | 'FORFEIT';
+  | 'FORFEIT'
+  | 'NEUTRAL';
 
 export function buildBroadcastBanner(kind: BannerKind, detail = ''): HTMLElement {
   const banner = el('div', 'gsn-banner gsn-banner--kinetic');
@@ -239,6 +240,8 @@ function bannerTitle(kind: BannerKind): string {
       return 'REF LIQUIDATED!';
     case 'FORFEIT':
       return 'FORFEIT BY CARNAGE!';
+    case 'NEUTRAL':
+      return 'PLAY RESULT';
   }
 }
 
@@ -252,8 +255,12 @@ export function bannerKindForText(text: string): BannerKind {
   if (t.startsWith('FORFEIT')) return 'FORFEIT';
   if (t.includes('YARDS —')) return 'PENALTY';
   if (t.startsWith('PLAYER LIQUIDATED')) return 'CASUALTY';
-  if (t.toUpperCase().includes('NASTY')) return 'NASTY';
-  return 'CASUALTY';
+  if (t.includes('NASTY')) return 'NASTY';
+  // Scoring and ordinary-play lines from `bannerFor` (SAFETY!, FIELD GOAL IS
+  // GOOD!, FIELD GOAL NO GOOD, PUNT, SACKED!, INCOMPLETE, FIRST DOWN!, +N YARDS)
+  // are not a casualty: fall through to a neutral broadcast banner rather than
+  // mislabelling every routine play as "PLAYER LIQUIDATED!".
+  return 'NEUTRAL';
 }
 
 /** Bottom dynamic context bar with a per-context button legend. */
@@ -284,6 +291,6 @@ function legendFor(context: ControlContext): string {
   }
 }
 
-function factionName(id: FactionId): string {
+export function factionName(id: FactionId): string {
   return FACTIONS.find((x) => x.id === id)?.name.toUpperCase() ?? id.toUpperCase();
 }

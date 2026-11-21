@@ -44,6 +44,11 @@ test('the enriched scorebug renders crests, casualty skulls and a bribed-ref bad
   await expect(page.locator('[data-testid="skulls-away"] [data-lit="true"]')).toHaveCount(0);
   await expect(page.locator('[data-testid="bribe-badge"]')).toHaveAttribute('data-active', 'false');
 
+  // Capture the scorebug in a huddle-free frame: leave PICK first so the overlay
+  // is gone and the top bar reads in isolation (otherwise this screenshot is
+  // pixel-identical to football-huddle.png).
+  await page.evaluate(() => (window as unknown as { __mlf?: MlfHandle }).__mlf!.pick(0));
+  await expect(page.locator('[data-testid="huddle"]')).toBeHidden();
   await page.screenshot({ path: 'docs/screenshots/football-scorebug.png' });
 
   await page.waitForTimeout(300);
