@@ -107,7 +107,7 @@ export interface LivePlayResult {
   touchdown: boolean;
   /** Whether the carrier stepped out of bounds. */
   outOfBounds: boolean;
-  /** The tackler's slot, if the whistle was a tackle. */
+  /** The tackler's actor id, if the whistle was a tackle. */
   tackler: string | null;
   /** Final carrier position (downfield yards from LOS). */
   finalX: number;
