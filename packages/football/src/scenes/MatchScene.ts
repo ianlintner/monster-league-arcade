@@ -760,6 +760,13 @@ export class MatchScene extends Phaser.Scene {
     // Advance by the elapsed frame time, not a fixed 1/60 s per rendered frame:
     // otherwise the ball lands sooner on faster displays (frame-rate coupling).
     b.t += dt;
+    // The throw-release window (`passingUntil`) is measured on `liveElapsed`, but
+    // `updateLive` returns early while the ball is in flight, so that clock would
+    // otherwise freeze at launch time and a lob would hold the QB in the final
+    // throw pose until landing (lobs routinely outlast the 0.6 s release window).
+    // Advance it here too so the QB's release pose decays back to idle/run a fixed
+    // 0.6 s after the launch, independent of how long the ball stays airborne.
+    this.liveElapsed += dt;
     if (b.t >= b.dur) {
       this.ballFlight = null;
       b.onLand();

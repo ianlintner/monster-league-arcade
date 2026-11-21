@@ -195,14 +195,17 @@ export function resolveActorCell(
   // `pass_aim` is a *cocked aim*: hold the QB's wind-up frame (frame 1, the arm
   // drawn back) while the player chooses a target — it must NOT cycle into the
   // release pose every 0.5 s without a throw. `pass_aim_throw` is the one-shot
-  // release that follows `commitPass()`: it plays 0..3 once and then, as the
-  // ball leaves the QB's hand, `windowOpen` has already dropped so the next
-  // resolve returns to idle/run.
+  // release that follows `commitPass()`. The airborne ball launches the instant
+  // commitPass fires (the carried ball switches to the in-flight overlay), so the
+  // QB must skip the three wind-up frames that still bake a *held* ball into the
+  // artwork (row 9 cols 0–2, `hold: f < 3` in generate-art.mjs). Jump straight to
+  // col 3 — the release pose with no ball drawn — and hold it, so the QB never
+  // shows a second football beside the one already flying.
   const fps = 8;
   const frame = Math.floor(timeAccum * fps);
   let col: number;
   if (anim === 'pass_aim') col = 1;
-  else if (anim === 'pass_aim_throw') col = Math.min(frame, spec.frames - 1);
+  else if (anim === 'pass_aim_throw') col = spec.frames - 1;
   else if (
     anim === 'casualty_death' ||
     anim === 'hit_stagger_knockdown' ||

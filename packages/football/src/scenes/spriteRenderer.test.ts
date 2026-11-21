@@ -139,4 +139,25 @@ describe('resolveActorCell', () => {
     expect(cell.animation).toBe('dive_tackle_lunge');
     expect(cell.col).toBe(ANIMATION_SPEC.dive_tackle_lunge.frames - 1);
   });
+
+  it('holds the cocked aim frame without cycling into the release', () => {
+    // The aim pose must stay on frame 1 (arm drawn back, ball in hand) while the
+    // player picks a target — never advance to the release pose (col 3) until a
+    // throw is actually committed.
+    expect(resolveActorCell(actor(), FACTION_SHEET.REAPERS, 0, 0, 'aim').col).toBe(1);
+    expect(resolveActorCell(actor(), FACTION_SHEET.REAPERS, 0, 10, 'aim').col).toBe(1);
+  });
+
+  it('skips the baked-ball wind-up frames on a throw release', () => {
+    // row 9 cols 0–2 bake a *held* football into the artwork (generate-art.mjs
+    // `hold: f < 3`); the airborne ball launches the instant commitPass fires, so
+    // the QB must jump straight to col 3 (release, no ball drawn) and hold it,
+    // never showing a second football beside the one already flying.
+    expect(resolveActorCell(actor(), FACTION_SHEET.REAPERS, 0, 0, 'throw').col).toBe(
+      ANIMATION_SPEC.pass_aim_throw.frames - 1,
+    );
+    expect(resolveActorCell(actor(), FACTION_SHEET.REAPERS, 0, 10, 'throw').col).toBe(
+      ANIMATION_SPEC.pass_aim_throw.frames - 1,
+    );
+  });
 });
