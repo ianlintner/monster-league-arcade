@@ -9,7 +9,7 @@ export * from './sim/index';
 export * from './field/index';
 
 export function bootFootball(parent: HTMLElement, opts?: { production?: boolean }): Phaser.Game {
-  if (opts?.production) MatchScene.isProduction = true;
+  MatchScene.isProduction = opts?.production ?? false;
   return new Phaser.Game({
     type: Phaser.CANVAS,
     parent,

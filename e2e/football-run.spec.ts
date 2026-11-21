@@ -50,7 +50,9 @@ test('pick → snap → live down ends and the GameSession commits the result', 
   await page.evaluate(() => (window as unknown as { __mlf?: MlfHandle }).__mlf!.pick(0));
   expect((await mlf(page)).phase).toBe('PRE_SNAP');
   expect((await mlf(page)).mode).toBe('PRE_SNAP');
-  await page.screenshot({ path: 'docs/screenshots/football-presnap.png' });
+  // Incidental capture for this gameplay test — not the deliverable art. The
+  // deliverable `football-presnap.png` is written solely by screenshots.spec.ts.
+  await page.screenshot({ path: 'docs/screenshots/football-presnap-run.png' });
 
   // Snap into the live down.
   await page.evaluate(() => (window as unknown as { __mlf?: MlfHandle }).__mlf!.snap());
@@ -59,8 +61,9 @@ test('pick → snap → live down ends and the GameSession commits the result', 
   // Steer the carrier downfield and let the down play out.
   await page.keyboard.down('ArrowRight');
   await page.waitForTimeout(1000);
-  // Mid-run capture while the down is still live.
-  await page.screenshot({ path: 'docs/screenshots/football-midrun.png' });
+  // Mid-run capture while the down is still live. Incidental to this gameplay
+  // test; the deliverable `football-midrun.png` is written by screenshots.spec.ts.
+  await page.screenshot({ path: 'docs/screenshots/football-midrun-run.png' });
   await page.waitForTimeout(1500);
   await page.keyboard.up('ArrowRight');
 

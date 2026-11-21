@@ -181,8 +181,12 @@ export function resolveActorCell(
   }
   const spec = ANIMATION_SPEC[anim];
   // One-shot/looping non-run frames tick on time; cycle idle/celebration, hold
-  // terminal frames on the last cell.
-  const cycle = anim === 'casualty_death' || anim === 'hit_stagger_knockdown';
+  // terminal frames on the last cell. A dive is also one-shot: LivePlay's dive
+  // lasts 0.4 s but 3 frames at 8 fps wrap in 0.375 s, so clamping to the last
+  // frame (like the terminal animations) keeps the lunge from snapping back to
+  // its starting pose before it completes.
+  const cycle =
+    anim === 'casualty_death' || anim === 'hit_stagger_knockdown' || anim === 'dive_tackle_lunge';
   const fps = 8;
   const frame = Math.floor(timeAccum * fps);
   const col = cycle ? Math.min(frame, spec.frames - 1) : frame % spec.frames;

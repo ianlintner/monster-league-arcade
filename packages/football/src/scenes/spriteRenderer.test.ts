@@ -127,4 +127,12 @@ describe('resolveActorCell', () => {
     expect(cell.animation).toBe('hit_stagger_knockdown');
     expect(cell.col).toBe(ANIMATION_SPEC.hit_stagger_knockdown.frames - 1);
   });
+
+  it('clamps dive playback to its last frame rather than wrapping', () => {
+    // LivePlay's dive lasts 0.4 s but 3 frames at 8 fps wrap at 0.375 s; the
+    // lunge must hold its final frame instead of snapping back to the start.
+    const cell = resolveActorCell(actor({ diving: true }), FACTION_SHEET.REAPERS, 0, 10);
+    expect(cell.animation).toBe('dive_tackle_lunge');
+    expect(cell.col).toBe(ANIMATION_SPEC.dive_tackle_lunge.frames - 1);
+  });
 });

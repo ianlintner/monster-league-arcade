@@ -885,6 +885,19 @@ export class MatchScene extends Phaser.Scene {
     // the passer, so ownership must NOT fall back to the QB here.
     this.ballHolderId = snap.force?.complete ? receiver.id : null;
     this.collectDamageAndCasualties();
+    // A completed catch ends through `snap` (not `commitOutcome`), so the receiver's
+    // presentation state never runs through the play-over roll. Mirror it here from
+    // the committed result: a touchdown completion celebrates, an ordinary completion
+    // is tackled (GameSession already applied the receiver's tackle damage above) and
+    // drops into a knockdown. Death (a lethal hazard on the catch) still wins because
+    // `collectDamageAndCasualties` set `dead` first and `baseAnimation` prefers it.
+    if (snap.force?.complete) {
+      const res = this.session.lastResult;
+      const pres = this.presentation.get(receiver.id) ?? {};
+      if (!pres.dead) pres.celebrating = res?.touchdown === true;
+      if (!pres.dead && !pres.celebrating) pres.downed = true;
+      this.presentation.set(receiver.id, pres);
+    }
     void qb;
   }
 
@@ -1374,6 +1387,15 @@ export class MatchScene extends Phaser.Scene {
     actors.sort((a, b) => a.depth - b.depth);
     for (const a of actors) this.drawActor(a);
 
+    // Phaser Containers render children in insertion (list) order, ignoring the
+    // `setDepth` calls made on individual children. The referee is drawn first and
+    // each actor's ring/shadow/ball after its sprite, so without an explicit
+    // re-sort a far player can cover the near-sideline referee and a defender's
+    // ring can draw over its own sprite. Reorder the container's children by the
+    // depth each was assigned once everything for this frame is in place — before
+    // the gas cloud and pass-window overlays are appended on top.
+    this.actorsLayer.sort('depth');
+
     // Ghoul Gas cloud: a translucent toxic ellipse at the drop spot, dimming any
     // defender who stands inside it (poison is committed by the sim at snap; this
     // is the on-field visual).
@@ -1462,8 +1484,12 @@ export class MatchScene extends Phaser.Scene {
     // dropped); in flight or after a fumble the ball is drawn separately in
     // drawOverlays. Ownership is tracked apart from `live.carrier` so a pass
     // completing to a receiver shows it in the receiver's hands, not the QB's.
+    // The QB's throw-windup frames 0–2 already draw the ball in the sheet
+    // artwork, so skip the extra procedural ellipse for those cells (keep the
+    // ground shadow) to avoid a doubled ball right at the carrier's hands.
     if (s.id === this.ballHolderId && !this.ballFlight) {
-      this.drawCarriedBall(a.px, a.py - 12 * a.scale, a.scale, a.depth);
+      const windupHoldsBall = cell.animation === 'pass_windup_throw' && cell.col < 3;
+      this.drawCarriedBall(a.px, a.py - 12 * a.scale, a.scale, a.depth, windupHoldsBall);
     }
   }
 
@@ -1495,20 +1521,30 @@ export class MatchScene extends Phaser.Scene {
   }
 
   /** A small procedurally-drawn football (brown ellipse + white stitching) at the
-   *  carrier's hands, with its own tiny ground shadow. Scaled by the projection. */
-  private drawCarriedBall(px: number, py: number, scale: number, depth: number): void {
-    const g = this.add.graphics();
+   *  carrier's hands, with its own tiny ground shadow. Scaled by the projection.
+   *  `ballInArtwork` suppresses the ellipse (the sprite sheet already drew it,
+   *  e.g. the QB's throw windup) while still laying down the ground shadow. */
+  private drawCarriedBall(
+    px: number,
+    py: number,
+    scale: number,
+    depth: number,
+    ballInArtwork = false,
+  ): void {
     const rx = 6 * scale;
     const ry = 4 * scale;
-    g.fillStyle(toPhaserColor('HELLFIRE_AMBER'), 1);
-    g.fillEllipse(px, py, rx, ry);
-    // Seam stripe + laces, kept minimal so the ball is instantly identifiable.
-    g.lineStyle(1, toPhaserColor('BONE_WHITE'), 0.9);
-    g.lineBetween(px - rx, py, px + rx, py);
-    g.lineBetween(px - rx * 0.4, py - ry, px - rx * 0.4, py + ry);
-    g.lineBetween(px + rx * 0.4, py - ry, px + rx * 0.4, py + ry);
-    g.setDepth(depth + 0.2);
-    this.actorsLayer.add(g);
+    if (!ballInArtwork) {
+      const g = this.add.graphics();
+      g.fillStyle(toPhaserColor('HELLFIRE_AMBER'), 1);
+      g.fillEllipse(px, py, rx, ry);
+      // Seam stripe + laces, kept minimal so the ball is instantly identifiable.
+      g.lineStyle(1, toPhaserColor('BONE_WHITE'), 0.9);
+      g.lineBetween(px - rx, py, px + rx, py);
+      g.lineBetween(px - rx * 0.4, py - ry, px - rx * 0.4, py + ry);
+      g.lineBetween(px + rx * 0.4, py - ry, px + rx * 0.4, py + ry);
+      g.setDepth(depth + 0.2);
+      this.actorsLayer.add(g);
+    }
 
     const shadow = this.add.ellipse(px, py + ry + 3 * scale, rx, 2 * scale, 0x000000, 0.3);
     shadow.setDepth(depth - 0.5);
