@@ -17,7 +17,7 @@ import {
 } from '@monster-league/shared-core';
 import { GameSession, type Slot } from '../sim/index';
 import { buildLivePlayInput, projectActor } from '../field/fieldMapper';
-import { LivePlay, LIVE_TUNING, type LiveActorState, type LivePlayResult } from '../field/LivePlay';
+import { LivePlay, type LiveActorState, type LivePlayResult } from '../field/LivePlay';
 import { HazardManager } from '../field/HazardManager';
 import { resolvePassAttempt, resolveScrambleOutcome } from '../field/PlayOrchestrator';
 import { styleForHold } from '../field/Ballistics';
@@ -29,8 +29,7 @@ import {
   REF_SHEET_NECRO,
   REF_SHEET_DEMON,
   SPRITE_CELL,
-  SHEET_WIDTH,
-  SHEET_HEIGHT,
+  SPRITE_COLS,
   resolveActorCell,
   baseAnimation,
   sheetKey,
@@ -157,6 +156,10 @@ export class MatchScene extends Phaser.Scene {
   private nastySnap: ReturnType<NastyFieldEffects['tick']> | null = null;
   /** Elapsed live-down seconds, fed to NastyFieldEffects (hex/gas/shroud timers). */
   private liveElapsed = 0;
+  /** Wall-clock seconds since the last render frame (uncapped `update` delta, in
+   *  contrast to `LIVE_TUNING.dt`'s fixed sim step); drives animation clocks so a
+   *  run cycle advances by real time rather than once per rendered frame. */
+  private renderDt = 0;
   /** Ghoul Gas cloud marker (field coords + expiry) for the render dim. */
   private gasCloud: { x: number; y: number; until: number } | null = null;
   /** Hazard hits accumulated over the current live down, committed at whistle. */
@@ -216,6 +219,11 @@ export class MatchScene extends Phaser.Scene {
   private casualties: { id: string; x: number; y: number; ttl: number }[] = [];
 
   private looseBall: { x: number; y: number; ttl: number } | null = null;
+  /** Which actor *presentationally* holds the ball right now (actor id, not the
+   *  roster id). `LivePlay.carrier` stays the QB through a whole pass play, so the
+   *  carried-ball sprite must track possession independently: null while the ball
+   *  is in flight or loose, the receiver on a completion, null on a pick/incomplete. */
+  private ballHolderId: string | null = null;
 
   private pressed = new Set<number>();
 
@@ -227,21 +235,25 @@ export class MatchScene extends Phaser.Scene {
 
   preload(): void {
     this.load.json('atlas', '/assets/atlas.json');
-    // Faction sprite sheets (home + away) and both referee sheets. Nearest-
-    // neighbour scaling is enforced at draw time (setScale + pixelArt where
-    // supported), not via Phaser's texture filter, so sprites stay crisp.
+    // Faction sprite sheets (home + away) and both referee sheets are loaded as
+    // *sprite sheets* so Phaser registers a 48×48 texture frame per cell. Drawing
+    // a cell as a real frame (not `setCrop` on the whole 288×672 sheet) keeps the
+    // origin anchored to the selected cell's bottom-centre, so idle/run/terminal
+    // frames stay put at the actor's feet instead of drifting with each frame.
+    // Nearest-neighbour scaling comes from `pixelArt: true` (game config).
+    const frame = { frameWidth: SPRITE_CELL, frameHeight: SPRITE_CELL };
     for (const sheet of [
       'boneyard_reapers',
       'rotting_deadskins',
       'transylvania_nightstalkers',
       'salem_bayou_ghouls',
     ]) {
-      this.load.image(sheet, `/assets/sprites/${sheet}.png`);
-      this.load.image(`${sheet}-away`, `/assets/sprites/${sheet}-away.png`);
+      this.load.spritesheet(sheet, `/assets/sprites/${sheet}.png`, frame);
+      this.load.spritesheet(`${sheet}-away`, `/assets/sprites/${sheet}-away.png`, frame);
       this.load.image(`crest_${sheet}`, `/assets/sprites/crest_${sheet}.png`);
     }
-    this.load.image(REF_SHEET_NECRO, `/assets/sprites/${REF_SHEET_NECRO}.png`);
-    this.load.image(REF_SHEET_DEMON, `/assets/sprites/${REF_SHEET_DEMON}.png`);
+    this.load.spritesheet(REF_SHEET_NECRO, `/assets/sprites/${REF_SHEET_NECRO}.png`, frame);
+    this.load.spritesheet(REF_SHEET_DEMON, `/assets/sprites/${REF_SHEET_DEMON}.png`, frame);
     // Arena tiles (home faction's arena): turf + end zone, tiled across the field.
     for (const arena of ['cursed_graveyard', 'brimstone_hellfire_pit', 'ectoplasm_swamp']) {
       this.load.image(`${arena}_turf`, `/assets/arenas/${arena}_turf.png`);
@@ -278,12 +290,14 @@ export class MatchScene extends Phaser.Scene {
     this.hazardGfx = this.add.graphics();
     this.drawHazards(this.hazardGfx as unknown as DrawSurface);
 
-    // Actors render as small tinted rectangles on a container rebuilt each frame.
-    this.actorsLayer = this.add.container(0, 0);
-    // Ground indicators (LOS/first-down lines, selection ring, stamina arc) render
-    // UNDER the actors, so they never cover a sprite; airborne ball, kick meter and
-    // pass reticles stay on `indicatorGfx` above.
+    // Ground indicators (LOS/first-down lines, selection ring, stamina arc) are a
+    // scene-level Graphics *below* the actor container in z-order. They must be
+    // added BEFORE `actorsLayer` — a later scene object wins regardless of the
+    // depths set on its children — so these lines render UNDER the sprites and
+    // never cover one. Airborne ball, kick meter and pass reticles stay on
+    // `indicatorGfx`, which is added AFTER the actors and therefore draws above.
     this.groundGfx = this.add.graphics();
+    this.actorsLayer = this.add.container(0, 0);
     this.indicatorGfx = this.add.graphics();
 
     this.readyText = this.add
@@ -306,6 +320,7 @@ export class MatchScene extends Phaser.Scene {
 
   override update(_time: number, delta: number): void {
     const dt = Math.min(delta, 50) / 1000;
+    this.renderDt = dt;
     this.sampleInput(dt);
 
     switch (this.mode) {
@@ -463,6 +478,9 @@ export class MatchScene extends Phaser.Scene {
     this.damagePopups = [];
     this.casualties = [];
     this.looseBall = null;
+    // The center/QB holds the ball at the snap; presentation ownership reverts to
+    // the live carrier until a pass launches it or a fumble knocks it loose.
+    this.ballHolderId = this.live?.carrier.id ?? null;
     this.pendingHazardHits = [];
     this.liveElapsed = 0;
     this.nastySnap = null;
@@ -809,6 +827,9 @@ export class MatchScene extends Phaser.Scene {
     // Keep the animation readable regardless of distance (min ~0.45s).
     const dur = Math.max(0.45, dist / speed);
     this.windowsOpen = false;
+    // The ball leaves the QB's hands the moment the throw launches; carried-ball
+    // rendering switches to the in-flight overlay (drawOverlays) for the duration.
+    this.ballHolderId = null;
     this.ballFlight = {
       fromX: qb.x,
       fromY: qb.y,
@@ -853,6 +874,11 @@ export class MatchScene extends Phaser.Scene {
     if (this.pendingHazardHits.length > 0) snap.hazards = [...this.pendingHazardHits];
     const res = this.session.snap(snap);
     this.showBanner(res.banner);
+    // The receiver catches and holds the ball only on a completion; on a pick or
+    // deflection/incompletion the down ends without any field actor carrying it
+    // (the next down's snap re-initializes ownership). `live.carrier` still names
+    // the passer, so ownership must NOT fall back to the QB here.
+    this.ballHolderId = snap.force?.complete ? receiver.id : null;
     this.collectDamageAndCasualties();
     void qb;
   }
@@ -891,15 +917,21 @@ export class MatchScene extends Phaser.Scene {
       if (!actor) continue;
       const f = projectActor(actor.x, actor.y, this.liveLos);
       const s = projectToScreen(f.x, f.y);
-      this.casualties.push({ id: c.playerId, x: s.x, y: s.y, ttl: 2.0 });
+      this.casualties.push({ id: actor.id, x: s.x, y: s.y, ttl: 2.0 });
       // Presentation: a casualty kills the victim — the sprite plays its death
       // pose while the red/bone bloom settles (Colour commentary handles the rest).
-      const pres = this.presentation.get(c.playerId) ?? {};
+      // Key the presentation state by the resolved *actor id* (a slot id like
+      // home-RB1), not the raw roster id (`c.playerId` is home-1), so drawActor's
+      // lookup by actor id actually selects the victim's casualty_death animation.
+      const pres = this.presentation.get(actor.id) ?? {};
       pres.dead = true;
-      this.presentation.set(c.playerId, pres);
+      this.presentation.set(actor.id, pres);
     }
     if (r.fumble) {
       const carrier = this.live?.carrier;
+      // A fumble knocks the ball loose: no field actor carries it, so the carried
+      // sprite must vanish (the loose-ball overlay takes over in drawOverlays).
+      this.ballHolderId = null;
       if (carrier) {
         const f = projectActor(carrier.x, carrier.y, this.liveLos);
         const s = projectToScreen(f.x, f.y);
@@ -1030,19 +1062,41 @@ export class MatchScene extends Phaser.Scene {
     const endzone = 'cursed_graveyard_endzone';
     if (!this.textures.exists(turf)) return;
 
-    // Each region occupies a horizontal band of the trapezoid: left/right from
-    // the projected near edge (widest), full screen height top→near edge.
-    const drawRegion = (x0: number, x1: number, key: string, depth: number) => {
-      const nl = projectToScreen(x0, 53).x;
-      const nr = projectToScreen(x1, 53).x;
-      const img = this.add.image(nl, 0, key).setOrigin(0, 0).setDepth(depth);
-      img.setDisplaySize(nr - nl, CANVAS_HEIGHT);
-      return img;
+    // Each region is a horizontal *band of the trapezoid*, not a full-height
+    // rectangle: the four projected corners of a region define a trapezoid whose
+    // far edge (y=0) is narrower than its near edge (y=53). A full-height rectangle
+    // would paint turf beyond the far-edge field bounds and leave the end zones'
+    // far edges untextured. Draw a tiling sprite sized to the region's screen
+    // bounding box, then clip it to the region's four projected corners with a
+    // geometry mask so texture never leaks across a boundary.
+    const drawRegion = (x0: number, x1: number, key: string) => {
+      // Field x is 0..120; x0/x1 clip to the projection's valid range.
+      const farL = projectToScreen(x0, 0);
+      const farR = projectToScreen(x1, 0);
+      const nearR = projectToScreen(x1, 53);
+      const nearL = projectToScreen(x0, 53);
+      const minX = Math.min(farL.x, nearL.x);
+      const maxX = Math.max(farR.x, nearR.x);
+      const w = maxX - minX;
+      const h = CANVAS_HEIGHT;
+      const tile = this.add
+        .tileSprite(minX + w / 2, h / 2, w, h, key)
+        .setDepth(-1)
+        .setOrigin(0.5, 0.5);
+
+      // Clip the tiling sprite to this region's trapezoid (its four projected
+      // corners, drawn as two triangles like `perspectiveQuad`). Canvas renderer
+      // supports geometry masks; the mask Graphics is invisible (draw-only).
+      const maskGfx = this.add.graphics();
+      maskGfx.fillStyle(0xffffff, 1);
+      maskGfx.fillTriangle(farL.x, farL.y, farR.x, farR.y, nearR.x, nearR.y);
+      maskGfx.fillTriangle(farL.x, farL.y, nearR.x, nearR.y, nearL.x, nearL.y);
+      tile.setMask(maskGfx.createGeometryMask());
     };
 
-    drawRegion(0, 10, endzone, -1);
-    drawRegion(10, 110, turf, -1);
-    drawRegion(110, 120, endzone, -1);
+    drawRegion(0, 10, endzone);
+    drawRegion(10, 110, turf);
+    drawRegion(110, 120, endzone);
   }
 
   /** Draw the static 2.5D gridiron line-work + markings once. */
@@ -1275,6 +1329,10 @@ export class MatchScene extends Phaser.Scene {
   private drawActors(): void {
     this.actorsLayer.removeAll(true);
     this.spriteBackedActorCount = 0;
+    // The overlay Graphics is rebuilt every frame; clear it up front so pass
+    // reticles and any previous frame's in-flight ball / bloom markers do not
+    // accumulate into permanent trails (and a growing command buffer).
+    this.indicatorGfx.clear();
     if (!this.live) return;
 
     const los = this.liveLos;
@@ -1332,7 +1390,7 @@ export class MatchScene extends Phaser.Scene {
       this.animClock.set(id, 0);
       return 0;
     }
-    const t = (this.animClock.get(id) ?? 0) + LIVE_TUNING.dt;
+    const t = (this.animClock.get(id) ?? 0) + this.renderDt;
     this.animClock.set(id, t);
     return t;
   }
@@ -1361,13 +1419,15 @@ export class MatchScene extends Phaser.Scene {
       presentation,
     );
 
-    // Cell 48×48 shown from the full 288×672 sheet: size the WHOLE sheet to its
-    // projected footprint, then crop the 48×48 cell so the crop maps back to a
-    // full cell (not a sliver). `pixelArt: true` keeps scaling nearest-neighbour.
-    const sp = this.add.image(a.px, a.py - 9 * a.scale, cell.sheet);
+    // Select the 48×48 cell as a registered texture frame (row-major index) and
+    // size *only that cell* to the projected footprint; `pixelArt: true` keeps the
+    // nearest-neighbour scale crisp. The origin is the cell's bottom-centre, so the
+    // sprite's feet sit exactly at the projected position (and stay there across
+    // frame changes instead of drifting with the full sheet's 288×672 bounds).
+    const frameIndex = cell.row * SPRITE_COLS + cell.col;
+    const sp = this.add.image(a.px, a.py - 9 * a.scale, cell.sheet, frameIndex);
     sp.setOrigin(0.5, 1);
-    sp.setDisplaySize(SHEET_WIDTH * a.scale, SHEET_HEIGHT * a.scale);
-    sp.setCrop(cell.col * SPRITE_CELL, cell.row * SPRITE_CELL, SPRITE_CELL, SPRITE_CELL);
+    sp.setScale(a.scale);
     sp.setDepth(a.depth);
     this.actorsLayer.add(sp);
     this.spriteBackedActorCount++;
@@ -1386,9 +1446,11 @@ export class MatchScene extends Phaser.Scene {
     shadow.setDepth(a.depth - 0.5);
     this.actorsLayer.add(shadow);
 
-    // Carried ball at the carrier's hands (offsets so it reads as carried, not
-    // dropped); in flight the ball is drawn separately in drawOverlays.
-    if (a.isCarrier && !this.ballFlight) {
+    // Carried ball at the holder's hands (offsets so it reads as carried, not
+    // dropped); in flight or after a fumble the ball is drawn separately in
+    // drawOverlays. Ownership is tracked apart from `live.carrier` so a pass
+    // completing to a receiver shows it in the receiver's hands, not the QB's.
+    if (s.id === this.ballHolderId && !this.ballFlight) {
       this.drawCarriedBall(a.px, a.py - 12 * a.scale, a.scale, a.depth);
     }
   }
@@ -1402,12 +1464,13 @@ export class MatchScene extends Phaser.Scene {
     // Stand on the near sideline, just behind the line of scrimmage.
     const f = projectActor(-3, -24, los);
     const s = projectToScreen(f.x, f.y);
-    // Idle stance (row 0); cycle the idle frames slowly on the sim clock.
+    // Idle stance (row 0); cycle the idle frames slowly on the sim clock. The
+    // selected cell is a registered 48×48 frame (row-major index), origin anchored
+    // to the cell's bottom-centre just like every field actor.
     const idleCol = Math.floor(this.liveElapsed * 4) % 4;
-    const ref = this.add.image(s.x, s.y - 9 * s.scale, sheet);
+    const ref = this.add.image(s.x, s.y - 9 * s.scale, sheet, idleCol);
     ref.setOrigin(0.5, 1);
-    ref.setDisplaySize(SHEET_WIDTH * s.scale, SHEET_HEIGHT * s.scale);
-    ref.setCrop(idleCol * SPRITE_CELL, 0, SPRITE_CELL, SPRITE_CELL);
+    ref.setScale(s.scale);
     ref.setDepth(s.y);
     this.actorsLayer.add(ref);
     this.spriteBackedActorCount++;
