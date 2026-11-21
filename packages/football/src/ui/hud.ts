@@ -239,6 +239,20 @@ function bannerTitle(kind: BannerKind): string {
   }
 }
 
+/** Classify a `GameSession.bannerFor` headline into a broadcast banner kind. */
+export function bannerKindForText(text: string): BannerKind {
+  const t = text.toUpperCase();
+  if (t.startsWith('TOUCHDOWN')) return 'TOUCHDOWN';
+  if (t.startsWith('INTERCEPTED') || t.startsWith('TURNOVER ON DOWNS')) return 'TURNOVER';
+  if (t.startsWith('FUMBLE')) return 'FUMBLE';
+  if (t.startsWith('REF LIQUIDATED') || t.startsWith('REF BASHING')) return 'REF_LIQUIDATED';
+  if (t.startsWith('FORFEIT')) return 'FORFEIT';
+  if (t.includes('YARDS —')) return 'PENALTY';
+  if (t.startsWith('PLAYER LIQUIDATED')) return 'CASUALTY';
+  if (t.toUpperCase().includes('NASTY')) return 'NASTY';
+  return 'CASUALTY';
+}
+
 /** Bottom dynamic context bar with a per-context button legend. */
 export type ControlContext =
   | 'HUDDLE'

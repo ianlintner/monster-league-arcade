@@ -23,7 +23,16 @@ import { resolvePassAttempt, resolveScrambleOutcome } from '../field/PlayOrchest
 import { styleForHold } from '../field/Ballistics';
 import { NastyFieldEffects } from '../field/NastyFieldEffects';
 import { resolveKick, meterValue, KICK_METER } from '../field/KickMeter';
+import { decideCoachPlay } from '../ai/AICoach';
 import type { HazardHit } from '../sim/GameSession';
+import {
+  bannerKindForText,
+  buildBroadcastBanner,
+  buildHuddleOverlay,
+  downDistanceLabel,
+  formatClock,
+  type BannerKind,
+} from '../ui/hud';
 import {
   FACTION_SHEET,
   REF_SHEET_NECRO,
@@ -59,6 +68,24 @@ const FOURTH_DOWN_CATALOG: ReadonlyArray<{ id: string; label: string; kind: Play
   { id: 'INSIDE_GORE_RUN', label: 'Go For It (Run)', kind: 'RUN' },
 ];
 const DEFAULT_DEFENSE = 'BONE_CRUSH_BASE';
+
+/** Banner body line for a classified broadcast banner. */
+function detailForKind(kind: BannerKind, raw: string): string {
+  switch (kind) {
+    case 'TOUCHDOWN':
+    case 'TURNOVER':
+    case 'FUMBLE':
+    case 'PENALTY':
+    case 'REF_LIQUIDATED':
+      return raw;
+    case 'NASTY':
+      return 'A dirty trick is in play.';
+    case 'FORFEIT':
+      return raw.replace(/^FORFEIT BY CARNAGE[!]?\s*/, '');
+    case 'CASUALTY':
+      return raw;
+  }
+}
 
 /** The play list in play for the current down (4th down → special teams). */
 function catalogForDown(
@@ -110,6 +137,7 @@ export class MatchScene extends Phaser.Scene {
   private mode: 'PICK' | 'PRE_SNAP' | 'LIVE' | 'BANNER' = 'PICK';
   private selectedPlayIndex = 0;
   private bannerText = '';
+  private bannerKind: BannerKind = 'CASUALTY';
   private bannerTimer = 0;
   /** Set once the session reaches GAME_OVER; disables play selection + dismiss. */
   private gameOver = false;
@@ -946,8 +974,17 @@ export class MatchScene extends Phaser.Scene {
   /** Show the play-over banner and enter the BANNER presentation state. */
   private showBanner(text: string): void {
     this.bannerText = text;
+    this.bannerKind = bannerKindForText(text);
     this.bannerTimer = 2.2;
     this.mode = 'BANNER';
+    this.renderKineticBanner(text);
+  }
+
+  /** Rebuild the `#banner` node as an animated GSN 66.6 broadcast banner. */
+  private renderKineticBanner(text: string): void {
+    const host = document.getElementById('banner');
+    if (!host) return;
+    host.replaceChildren(buildBroadcastBanner(this.bannerKind, detailForKind(this.bannerKind, text)));
   }
 
   /** Read the just-committed snap's damage/casualties into floating popups. */
@@ -1885,11 +1922,86 @@ export class MatchScene extends Phaser.Scene {
         ).padStart(2, '0')}`;
       }
     }
+    this.syncHud();
+    this.syncHuddle();
     const prompt = document.querySelector('.gsn-control-bar__prompt');
     if (prompt) prompt.textContent = line;
 
     const banner = document.getElementById('banner');
-    if (banner) banner.textContent = this.mode === 'BANNER' ? this.bannerText : '';
+    if (banner) {
+      if (this.mode !== 'BANNER') {
+        // Kinematic banners own their children; clear without touching the host.
+        if (banner.children.length > 0) banner.replaceChildren();
+      }
+    }
+  }
+
+  /**
+   * Sync the broadcast HUD's game-state cells (casualty skulls, down & distance,
+   * play clock, ball position, bribed-ref badge) from `GameSession` in place.
+   * Idempotent and null-guarded so it is safe to call every rendered frame.
+   */
+  private syncHud(): void {
+    const root = document.querySelector('.gsn-scorebug-shell') ?? document.querySelector(
+      '[data-testid="scorebug"]',
+    );
+    if (!root) return;
+    const s = this.session;
+
+    // Casualty skulls.
+    for (const side of ['home', 'away'] as const) {
+      const row = root.querySelector(`[data-testid="skulls-${side}"]`);
+      if (!row) continue;
+      const count = s.roster[side].casualties;
+      Array.from(row.children).forEach((skull, i) => {
+        skull.setAttribute('data-lit', String(i < count));
+      });
+    }
+
+    // Play clock + down/distance + ball position (added by the enriched scorebug).
+    const playclock = root.querySelector('.gsn-scorebug__playclock');
+    if (playclock) playclock.textContent = `PLAY ${formatClock(s.playClock)}`;
+    const down = root.querySelector('.gsn-scorebug__down');
+    if (down) down.textContent = downDistanceLabel(s.down, s.yardsToGo);
+    const los = root.querySelector('.gsn-scorebug__los');
+    if (los) los.textContent = `BALL ON ${s.possession === 'home' ? 'OPP' : 'OWN'} ${
+      s.possession === 'home' ? 100 - s.los : s.los
+    }`;
+
+    // Bribed-ref badge.
+    const bribe = root.querySelector('[data-testid="bribe-badge"]');
+    if (bribe) {
+      const bribed = s.ref.isBribed ? s.ref.bribedBy : null;
+      bribe.setAttribute('data-active', String(bribed !== null));
+    }
+  }
+
+  /**
+   * Render the Genesis huddle overlay (formation + A/B/C play cards) into the
+   * `#huddle` node while the scene is in PICK, and clear it otherwise. The play
+   * cards mirror `catalogForDown` so the overlay and the control bar agree.
+   */
+  private syncHuddle(): void {
+    const host = document.getElementById('huddle');
+    if (!host) return;
+    if (this.mode !== 'PICK') {
+      host.replaceChildren();
+      host.hidden = true;
+      return;
+    }
+    const cat = catalogForDown(this.session.down);
+    const plays = cat.map((p, i) => ({
+      label: (['A', 'B', 'C'] as const)[i]!,
+      name: p.label,
+      kind: p.kind,
+      formation: p.kind === 'PASS' ? 'SHOTGUN' : 'I-FORM',
+    }));
+    const formations = [...new Set(plays.map((p) => p.formation))];
+    const availableNasties = this.session.charges.remaining(this.session.possession, this.session.half);
+    host.replaceChildren(
+      buildHuddleOverlay({ formations, plays, availableNasties }),
+    );
+    host.hidden = false;
   }
 
   // ------------------------------------------------------------- debug handle
@@ -1909,6 +2021,26 @@ export class MatchScene extends Phaser.Scene {
     const lastResult = () => this.session?.lastResult ?? null;
     const hazardManager = () => this.hazardManager;
     const spriteBackedActors = () => this.spriteBackedActorCount;
+    const bannerKind = () => this.bannerKind;
+    const aiDecision = () => {
+      const s = this.session;
+      if (!s) return null;
+      const team = s.possession;
+      return decideCoachPlay({
+        down: s.down,
+        yardsToGo: s.yardsToGo,
+        los: s.los,
+        quarter: s.quarter,
+        clockSeconds: s.clock,
+        score: s.score,
+        team,
+        aiIsOffense: true,
+        ownCasualties: s.roster[team].casualties,
+        refBribedAgainst: s.ref.isBribed && s.ref.bribedBy !== team,
+        demonRefActive: s.ref.kind === 'DEMON_REF',
+        availableNasties: s.charges.remaining(team, s.half),
+      });
+    };
     (window as unknown as Record<string, unknown>).__mlf = {
       session: session(),
       get phase() {
@@ -1946,6 +2078,12 @@ export class MatchScene extends Phaser.Scene {
       },
       get hazards() {
         return hazardManager()?.snapshot() ?? [];
+      },
+      get bannerKind() {
+        return bannerKind();
+      },
+      get aiDecision() {
+        return aiDecision();
       },
       get actors() {
         return (
