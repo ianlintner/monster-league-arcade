@@ -12,4 +12,4 @@ document.getElementById('scorebug')?.append(
   }),
 );
 const host = document.getElementById('game');
-if (host) bootFootball(host);
+if (host) bootFootball(host, { production: import.meta.env.PROD });
