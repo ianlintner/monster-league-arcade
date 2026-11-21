@@ -749,6 +749,11 @@ export class MatchScene extends Phaser.Scene {
     else force.fieldGoalGood = outcome.fieldGoalGood;
 
     const res = this.session.snap({ force } as Parameters<GameSession['snap']>[0]);
+    // A punt / field goal resolves instantly: the ball is away the moment the
+    // kick is locked. Clear presentation ownership so the carrier doesn't keep a
+    // carried-football sprite at its hands through the special-teams result
+    // banner (there is no in-flight overlay on kicks to take over from it).
+    this.ballHolderId = null;
     this.showBanner(res.banner);
     this.collectDamageAndCasualties();
   }
@@ -1250,6 +1255,21 @@ export class MatchScene extends Phaser.Scene {
     const y0 = cy - ch / 2;
     // 1px #0B0711 outline so the digits read clearly over the turf/yard lines.
     const outline = Math.max(1, Math.round(s));
+    // The yard numbers at x=15,25,… coincide with the *minor* lines drawn every
+    // five yards, so those lines run straight through the label and peek between
+    // the digit cells (a per-cell outline can't hide a line inside a glyph gap).
+    // Lay a VOID_BLACK panel over the label's full bounds — including the outline
+    // and a hair of padding — so the crossing line is masked around the whole
+    // number, not just the lit cells. VOID_BLACK is the outline colour, so the
+    // panel reads as the number's dark plaque rather than a stray turf patch.
+    const pad = Math.max(1, Math.round(s * 2));
+    g.fillStyle(toPhaserColor('VOID_BLACK'), 1);
+    g.fillRect(
+      xBase - outline - pad,
+      y0 - outline - pad,
+      total + (outline + pad) * 2,
+      ch + (outline + pad) * 2,
+    );
     const draw = (color: number, alpha: number, inset: number) => {
       g.fillStyle(color, alpha);
       for (let i = 0; i < text.length; i++) {
@@ -1687,9 +1707,14 @@ export class MatchScene extends Phaser.Scene {
       g.lineBetween(s.x + rx, s.y, s.x, s.y + rx);
       g.lineBetween(s.x, s.y + rx, s.x - rx, s.y);
 
-      // Badge label floats ~20px above the receiver's head.
+      // Badge label floats ~20px above the receiver's head. The actor sprite is
+      // bottom-centre anchored at `s.y` (its feet), `SPRITE_CELL` tall, so its
+      // top sits `s.y - 44*scale` (the `+4*scale` baseline offset already landed
+      // the artwork's feet at the ground point). Place the badge above that top
+      // edge with 20px of clearance — not `26*scale`, which lands on the sprite's
+      // helmet/shoulder row and hides the receiver artwork.
       const badge = this.add
-        .text(s.x, s.y - 26 * s.scale, `[${key}]`, {
+        .text(s.x, s.y - (SPRITE_CELL - 4) * s.scale - 20, `[${key}]`, {
           fontFamily: '"Press Start 2P", monospace',
           fontSize: '8px',
           color: P.SPECTRAL_CYAN,
