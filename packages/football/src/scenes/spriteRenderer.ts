@@ -10,7 +10,7 @@
  * Sheet layout (public/assets/atlas.json, 48x48 cells, 6 cols x 14 rows):
  *   row 0        idle_stance        (4 frames)
  *   rows 1..8    run_8dir           (8 rows, 6 frames, facing S..SW)
- *   row 9        pass_windup_throw  (4 frames)
+ *   row 9        pass_windup_throw  (4 frames; rendered as `pass_aim`/`pass_aim_throw`)
  *   row 10       dive_tackle_lunge  (3 frames)
  *   row 11       hit_stagger_knockdown (4 frames)
  *   row 12       casualty_death     (6 frames)
@@ -35,7 +35,8 @@ export const REF_SHEET_DEMON = 'demon_ref';
 export type ActorAnimation =
   | 'idle_stance'
   | 'run_8dir'
-  | 'pass_windup_throw'
+  | 'pass_aim'
+  | 'pass_aim_throw'
   | 'dive_tackle_lunge'
   | 'hit_stagger_knockdown'
   | 'casualty_death'
@@ -45,7 +46,8 @@ export type ActorAnimation =
 export const ANIMATION_SPEC: Record<ActorAnimation, { firstRow: number; frames: number }> = {
   idle_stance: { firstRow: 0, frames: 4 },
   run_8dir: { firstRow: 1, frames: 6 },
-  pass_windup_throw: { firstRow: 9, frames: 4 },
+  pass_aim: { firstRow: 9, frames: 4 },
+  pass_aim_throw: { firstRow: 9, frames: 4 },
   dive_tackle_lunge: { firstRow: 10, frames: 3 },
   hit_stagger_knockdown: { firstRow: 11, frames: 4 },
   casualty_death: { firstRow: 12, frames: 6 },
@@ -122,18 +124,22 @@ export function runFacingFromVelocity(vx: number, vy: number): RunDir {
 /**
  * The base animation for an actor, ignoring run-frame playback. Presentation
  * terminal status (`dead`/`downed`/`celebrating`) takes priority, then dive,
- * pass windup, idle and run are chosen from live state.
+ * pass aiming, idle and run are chosen from live state.
+ *
+ * `passing` is `'aim'` while the QB is choosing a target (cocked, ball still in
+ * hand) and `'throw'` for the release frames that follow a launched pass.
  */
 export function baseAnimation(
   state: LiveActorState,
-  isPassingQB = false,
+  passing: 'aim' | 'throw' | null = null,
   presentation: ActorPresentationState = {},
 ): ActorAnimation {
   if (presentation.dead) return 'casualty_death';
   if (presentation.downed || state.downed) return 'hit_stagger_knockdown';
   if (presentation.celebrating) return 'celebration';
   if (state.diving) return 'dive_tackle_lunge';
-  if (isPassingQB) return 'pass_windup_throw';
+  if (passing === 'throw') return 'pass_aim_throw';
+  if (passing === 'aim') return 'pass_aim';
   if (state.engaged && Math.hypot(state.vx, state.vy) < 0.3) return 'idle_stance';
   // Running vs idle: a moving actor runs; a stationary one idles.
   if (Math.hypot(state.vx, state.vy) < 0.15) return 'idle_stance';
@@ -164,10 +170,10 @@ export function resolveActorCell(
   sheet: string,
   frameAccum: number,
   timeAccum: number,
-  passingQB = false,
+  passing: 'aim' | 'throw' | null = null,
   presentation: ActorPresentationState = {},
 ): SpriteCell {
-  const anim = baseAnimation(state, passingQB, presentation);
+  const anim = baseAnimation(state, passing, presentation);
   if (anim === 'run_8dir') {
     const facing = runFacingFromVelocity(state.vx, state.vy);
     const row = ANIMATION_SPEC.run_8dir.firstRow + RUN_DIR_ORDER.indexOf(facing);
@@ -185,11 +191,25 @@ export function resolveActorCell(
   // lasts 0.4 s but 3 frames at 8 fps wrap in 0.375 s, so clamping to the last
   // frame (like the terminal animations) keeps the lunge from snapping back to
   // its starting pose before it completes.
-  const cycle =
-    anim === 'casualty_death' || anim === 'hit_stagger_knockdown' || anim === 'dive_tackle_lunge';
+  //
+  // `pass_aim` is a *cocked aim*: hold the QB's wind-up frame (frame 1, the arm
+  // drawn back) while the player chooses a target — it must NOT cycle into the
+  // release pose every 0.5 s without a throw. `pass_aim_throw` is the one-shot
+  // release that follows `commitPass()`: it plays 0..3 once and then, as the
+  // ball leaves the QB's hand, `windowOpen` has already dropped so the next
+  // resolve returns to idle/run.
   const fps = 8;
   const frame = Math.floor(timeAccum * fps);
-  const col = cycle ? Math.min(frame, spec.frames - 1) : frame % spec.frames;
+  let col: number;
+  if (anim === 'pass_aim') col = 1;
+  else if (anim === 'pass_aim_throw') col = Math.min(frame, spec.frames - 1);
+  else if (
+    anim === 'casualty_death' ||
+    anim === 'hit_stagger_knockdown' ||
+    anim === 'dive_tackle_lunge'
+  )
+    col = Math.min(frame, spec.frames - 1);
+  else col = frame % spec.frames;
   return { sheet, row: spec.firstRow, col, animation: anim };
 }
 

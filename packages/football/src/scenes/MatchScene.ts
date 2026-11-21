@@ -214,6 +214,12 @@ export class MatchScene extends Phaser.Scene {
     onLand: () => void;
   } | null = null;
 
+  /** Live-down time (seconds) until which the QB plays the one-shot throw release.
+   *  Set on `commitPass`; the release frames (row 9, 0..3) play once while the ball
+   *  is airborne, then resolve back to idle/run. This separates *aiming* (a cocked
+   *  hold while the windows are open) from *throwing* (the release on launch). */
+  private passingUntil = -1;
+
   /** Floating damage numbers + casualty/death animations, cleared per down. */
   private damagePopups: { x: number; y: number; text: string; color: number; ttl: number }[] = [];
   private casualties: { id: string; x: number; y: number; ttl: number }[] = [];
@@ -461,6 +467,14 @@ export class MatchScene extends Phaser.Scene {
     this.damagePopups = [];
     this.casualties = [];
     this.looseBall = null;
+    // Reset the Ghoul Gas cloud with the other per-down presentation state: if the
+    // previous down ended while gas was active, `liveElapsed` stays frozen through
+    // the banner/PRE_SNAP, so a stale cloud would otherwise keep drawing over the
+    // next formation until the snap (which resets it too).
+    this.gasCloud = null;
+    // Same for the throw-release window: a prior down's launch must not leave the
+    // QB frozen in a wind-up while the next formation renders its idle stance.
+    this.passingUntil = -1;
     // Capture the starting first-down target now; `snap()` mutates
     // `session.yardsToGo` when the result commits, which would otherwise drag the
     // amber line during the banner while the actors + LOS stay frozen. The
@@ -490,6 +504,7 @@ export class MatchScene extends Phaser.Scene {
     this.liveElapsed = 0;
     this.nastySnap = null;
     this.gasCloud = null;
+    this.passingUntil = -1;
     // Nasties are *selected* during PRE_SNAP (`session.callNasty`), after the pick
     // already primed the field effects at `prepareLivePlay()`. Reinitialize at snap
     // from the final pre-snap selection so a Dynamite Pitch arms its grenade count
@@ -835,6 +850,10 @@ export class MatchScene extends Phaser.Scene {
     // The ball leaves the QB's hands the moment the throw launches; carried-ball
     // rendering switches to the in-flight overlay (drawOverlays) for the duration.
     this.ballHolderId = null;
+    // Arm the QB's one-shot throw release: play the row-9 release frames once while
+    // the ball is airborne (a ~0.5 s window covers even the fastest bullet), instead
+    // of snapping straight to idle the instant `windowsOpen` drops.
+    this.passingUntil = this.liveElapsed + 0.6;
     this.ballFlight = {
       fromX: qb.x,
       fromY: qb.y,
@@ -1015,9 +1034,10 @@ export class MatchScene extends Phaser.Scene {
       this.presentation.set(carrierId, pres);
     }
     if (r.tackler) {
-      // `r.tackler` is the tackler's *slot*; resolve the actor id so the
-      // celebration lands on the right sprite.
-      const tackler = this.live?.actors.find((a) => a.slot === r.tackler && a.side === 'DEFENSE');
+      // `r.tackler` is the tackler's *actor id* (`away-DL1`), not its slot:
+      // `LivePlay` records `nearest.id` (LivePlay.ts:492). Match against `a.id`
+      // so the tackler's stop celebration lands on the defender sprite.
+      const tackler = this.live?.actors.find((a) => a.id === r.tackler && a.side === 'DEFENSE');
       if (tackler) {
         const tacklerPres = this.presentation.get(tackler.id) ?? {};
         tacklerPres.celebrating = true;
@@ -1436,17 +1456,26 @@ export class MatchScene extends Phaser.Scene {
     // texture (home faction roster uses the base sheet, away roster uses `-away`).
     const sheet = sheetKey(baseSheet, s.team !== 'home');
     const frameAccum = this.runDist.get(s.id) ?? 0;
-    // The QB shows a throw windup while a pass is armed and the ball is still
-    // in his hands; every other actor runs/idles by velocity.
-    const passingQB = a.isCarrier && this.isPassPlay && !this.ballFlight && this.windowsOpen;
+    // Passing state: `'aim'` while the QB is behind the LOS with the receiving
+    // windows open (cocked, ball in hand — holds frame 1 instead of cycling into
+    // the release every 0.5 s); `'throw'` for the one-shot release frames that
+    // follow a launched pass (armed until `passingUntil`). Every other actor runs
+    // or idles by velocity.
+    const passing: 'aim' | 'throw' | null = a.isCarrier
+      ? this.isPassPlay && this.windowsOpen && !this.ballFlight
+        ? 'aim'
+        : this.isPassPlay && this.liveElapsed <= this.passingUntil && this.ballFlight
+          ? 'throw'
+          : null
+      : null;
     const presentation = this.presentation.get(s.id) ?? {};
-    const anim = baseAnimation(s, passingQB, presentation);
+    const anim = baseAnimation(s, passing, presentation);
     const cell = resolveActorCell(
       s,
       sheet,
       frameAccum,
       this.animTime(s.id, anim),
-      passingQB,
+      passing,
       presentation,
     );
 
@@ -1484,12 +1513,18 @@ export class MatchScene extends Phaser.Scene {
     // dropped); in flight or after a fumble the ball is drawn separately in
     // drawOverlays. Ownership is tracked apart from `live.carrier` so a pass
     // completing to a receiver shows it in the receiver's hands, not the QB's.
-    // The QB's throw-windup frames 0–2 already draw the ball in the sheet
-    // artwork, so skip the extra procedural ellipse for those cells (keep the
-    // ground shadow) to avoid a doubled ball right at the carrier's hands.
+    // The QB's wind-up frames draw the ball in the sheet artwork, so skip the
+    // extra procedural ellipse for those cells (keep the ground shadow) to avoid
+    // a doubled ball right at the carrier's hands. Applies to the cocked aim pose
+    // (frame 1) and the throw-release wind-up frames (0..2); frame 3 is the
+    // release, after which the ball is already in flight (this branch is skipped).
     if (s.id === this.ballHolderId && !this.ballFlight) {
-      const windupHoldsBall = cell.animation === 'pass_windup_throw' && cell.col < 3;
-      this.drawCarriedBall(a.px, a.py - 12 * a.scale, a.scale, a.depth, windupHoldsBall);
+      const windupHoldsBall =
+        (cell.animation === 'pass_aim' && cell.col < 3) ||
+        (cell.animation === 'pass_aim_throw' && cell.col < 3);
+      // Ball at the holder's hands; its shadow sits on the *ground* under the
+      // holder (`a.py`), not under the elevated ball, so pass both in.
+      this.drawCarriedBall(a.px, a.py - 12 * a.scale, a.py, a.scale, a.depth, windupHoldsBall);
     }
   }
 
@@ -1521,32 +1556,42 @@ export class MatchScene extends Phaser.Scene {
   }
 
   /** A small procedurally-drawn football (brown ellipse + white stitching) at the
-   *  carrier's hands, with its own tiny ground shadow. Scaled by the projection.
+   *  carrier's hands, with its own ground shadow *under the holder*. `px`/`py` is
+   *  the elevated ball position (the carrier's hands); `groundPy` is the holder's
+   *  projected ground y, where the ball's shadow belongs — never under the
+   *  elevated ball, which would float the shadow ~5px above the turf.
    *  `ballInArtwork` suppresses the ellipse (the sprite sheet already drew it,
    *  e.g. the QB's throw windup) while still laying down the ground shadow. */
   private drawCarriedBall(
     px: number,
     py: number,
+    groundPy: number,
     scale: number,
     depth: number,
     ballInArtwork = false,
   ): void {
-    const rx = 6 * scale;
-    const ry = 4 * scale;
+    // `fillEllipse(x, y, width, height)` takes *full* dimensions (not radii), so
+    // size the ball by half-extents and pass `2*hw/2*hh` for the fill. The seam
+    // and laces then use the same half-extents so they stay inset within the
+    // 6×4 ball instead of extending 12px/8px outside it as radii would.
+    const hw = 3 * scale; // half-width  → 6px ball at scale 1
+    const hh = 2 * scale; // half-height → 4px ball at scale 1
     if (!ballInArtwork) {
       const g = this.add.graphics();
       g.fillStyle(toPhaserColor('HELLFIRE_AMBER'), 1);
-      g.fillEllipse(px, py, rx, ry);
+      g.fillEllipse(px, py, hw * 2, hh * 2);
       // Seam stripe + laces, kept minimal so the ball is instantly identifiable.
       g.lineStyle(1, toPhaserColor('BONE_WHITE'), 0.9);
-      g.lineBetween(px - rx, py, px + rx, py);
-      g.lineBetween(px - rx * 0.4, py - ry, px - rx * 0.4, py + ry);
-      g.lineBetween(px + rx * 0.4, py - ry, px + rx * 0.4, py + ry);
+      g.lineBetween(px - hw, py, px + hw, py);
+      g.lineBetween(px - hw * 0.4, py - hh, px - hw * 0.4, py + hh);
+      g.lineBetween(px + hw * 0.4, py - hh, px + hw * 0.4, py + hh);
       g.setDepth(depth + 0.2);
       this.actorsLayer.add(g);
     }
 
-    const shadow = this.add.ellipse(px, py + ry + 3 * scale, rx, 2 * scale, 0x000000, 0.3);
+    // The ball's shadow grounds it *under the holder* (at the player's feet),
+    // matching the actor's own ground ellipse rather than sitting up at the hands.
+    const shadow = this.add.ellipse(px, groundPy, hw, 2 * scale, 0x000000, 0.3);
     shadow.setDepth(depth - 0.5);
     this.actorsLayer.add(shadow);
   }

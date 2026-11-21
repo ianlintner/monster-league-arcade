@@ -77,8 +77,12 @@ describe('baseAnimation', () => {
     expect(baseAnimation(actor({ vx: 2, vy: 0 }))).toBe('run_8dir');
   });
 
-  it('a passing QB winds up even while moving', () => {
-    expect(baseAnimation(actor({ vx: 2 }), true)).toBe('pass_windup_throw');
+  it('a passing QB shows the cocked aim while choosing a target', () => {
+    expect(baseAnimation(actor({ vx: 2 }), 'aim')).toBe('pass_aim');
+  });
+
+  it('a throwing QB plays the release frames', () => {
+    expect(baseAnimation(actor(), 'throw')).toBe('pass_aim_throw');
   });
 });
 
