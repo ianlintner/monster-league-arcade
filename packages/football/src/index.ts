@@ -8,7 +8,8 @@ export { CANVAS_WIDTH, CANVAS_HEIGHT, MatchScene };
 export * from './sim/index';
 export * from './field/index';
 
-export function bootFootball(parent: HTMLElement): Phaser.Game {
+export function bootFootball(parent: HTMLElement, opts?: { production?: boolean }): Phaser.Game {
+  if (opts?.production) MatchScene.isProduction = true;
   return new Phaser.Game({
     type: Phaser.CANVAS,
     parent,
