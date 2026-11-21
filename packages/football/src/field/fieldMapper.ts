@@ -114,8 +114,10 @@ export function buildLivePlayInput(
     });
   }
 
-  // Carrier route: the play's CARRY assignment (or QB kick/pass route).
-  const carrierSlot = offPlay.carrier;
+  // Carrier: for a run the play's `carrier` slot (RB/run); for a pass the QB
+  // holds the ball at snap and drops back while receivers run their routes.
+  const isPass = offPlay.kind === 'PASS';
+  const carrierSlot: OffenseSlot = isPass ? 'QB' : offPlay.carrier;
   const carrierId = `${offense}-${carrierSlot}`;
   const carrierRoutes = offPlay.assignments[carrierSlot]?.route ?? [];
   const carrierRoute: LiveWaypoint[] = carrierRoutes.map(toLiveWaypoint);

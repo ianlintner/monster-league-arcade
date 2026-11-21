@@ -115,6 +115,53 @@ describe('LivePlay resolution', () => {
     expect(lp.carrier.x).toBeGreaterThan(0);
     expect(lp.result().yards).toBeGreaterThan(0);
   });
+
+  it('a scramble tackled past the LOS keeps its positive finalX (not a sack)', () => {
+    // Place a lone defender just beyond the LOS so the carrier is tackled only
+    // after crossing it. The whistle reason must be TACKLE with finalX > 0 — the
+    // state a positive-yard scramble produces, which the scene's sack classifier
+    // must preserve instead of clamping a past-the-LOS gain to zero.
+    const input = makeInput({ carrierRoute: [{ x: 8, y: 0 }], los: 25 });
+    const defender = input.actors.find((a) => a.id === 'away-DL1')!;
+    defender.x = 5; // past the LOS (carrier starts at x=0)
+    defender.y = -2; // on the carrier (home-RB1 at y=-2)
+    input.actors
+      .filter((a) => a.side === 'OFFENSE' && a.id !== 'home-RB1')
+      .forEach((a) => {
+        a.x = 200;
+      });
+    const lp = new LivePlay(input);
+    lp.command({ steerX: 1, steerY: 0 });
+    const res = lp.run();
+    expect(res.outcome).toMatchObject({ kind: 'WHISTLE', reason: 'TACKLE' });
+    expect(res.finalX).toBeGreaterThan(0);
+  });
+
+  it('a scramble out of bounds past the LOS keeps its positive finalX', () => {
+    // Steer diagonally out of bounds after crossing the LOS so the sideline exit
+    // happens downfield, not behind it. finalX must stay positive (an unscored
+    // positive gain), which the scene preserves instead of zeroing as a sack.
+    const input = makeInput({ carrierRoute: [{ x: 8, y: 30 }], los: 25 });
+    input.actors.forEach((a) => {
+      if (a.side === 'DEFENSE') a.x = 200;
+    });
+    const lp = new LivePlay(input);
+    lp.command({ steerX: 1, steerY: 1 });
+    const res = lp.run();
+    expect(res.outcome).toMatchObject({ kind: 'WHISTLE', reason: 'OUT_OF_BOUNDS' });
+    expect(res.outOfBounds).toBe(true);
+    expect(res.finalX).toBeGreaterThan(0);
+  });
+
+  it('whistles for a score at the snap-relative goal line, not x=100', () => {
+    // Ball on the opponent's 5: `los = 95` puts the attacking goal line at
+    // `x = 100 - los = 5`, so crossing x=5 scores instead of running to x=100.
+    const lp = new LivePlay(makeInput({ los: 95 }));
+    lp.command({ steerX: 1, steerY: 0 });
+    lp.run();
+    expect(lp.result().touchdown).toBe(true);
+    expect(lp.result().finalX).toBeLessThan(10);
+  });
 });
 
 describe('LivePlay determinism', () => {
