@@ -58,6 +58,10 @@ export type RunDir = (typeof RUN_DIR_ORDER)[number];
 
 export const SPRITE_CELL = 48;
 export const SPRITE_COLS = 6;
+export const SPRITE_ROWS = 14;
+/** Full faction/ref sheet dimensions in pixels (6×14 cells of 48px). */
+export const SHEET_WIDTH = SPRITE_CELL * SPRITE_COLS;
+export const SHEET_HEIGHT = SPRITE_CELL * SPRITE_ROWS;
 
 /** Resolved cell: which row/col of which sheet to draw. */
 export interface SpriteCell {
@@ -67,6 +71,21 @@ export interface SpriteCell {
   animation: ActorAnimation;
   /** True when this is a run frame advanced by distance (frame index drives playback). */
   facing?: RunDir;
+}
+
+/**
+ * Presentation-only terminal status layered over `LiveActorState` by the scene.
+ * `LivePlay` never sets `downed` on a tackle and has no death/casualty flag, so
+ * the resolver needs the scene to hand it what actually became of each actor.
+ * Death outranks knockdown; both outrank any movement-derived animation.
+ */
+export interface ActorPresentationState {
+  /** Tackled this down (knockdown) — set from the scene's tackle/casualty events. */
+  downed?: boolean;
+  /** Casualty of the play (death animation) — terminal over `downed`. */
+  dead?: boolean;
+  /** Celebrating (TD scorer / winner) — terminal over movement animations. */
+  celebrating?: boolean;
 }
 
 /**
@@ -101,12 +120,18 @@ export function runFacingFromVelocity(vx: number, vy: number): RunDir {
 }
 
 /**
- * The base animation for an actor, ignoring run-frame playback. Knockdown and
- * death take priority (they are terminal visual states); otherwise dive, pass
- * windup, idle and run are chosen from live state.
+ * The base animation for an actor, ignoring run-frame playback. Presentation
+ * terminal status (`dead`/`downed`/`celebrating`) takes priority, then dive,
+ * pass windup, idle and run are chosen from live state.
  */
-export function baseAnimation(state: LiveActorState, isPassingQB = false): ActorAnimation {
-  if (state.downed) return 'hit_stagger_knockdown';
+export function baseAnimation(
+  state: LiveActorState,
+  isPassingQB = false,
+  presentation: ActorPresentationState = {},
+): ActorAnimation {
+  if (presentation.dead) return 'casualty_death';
+  if (presentation.downed || state.downed) return 'hit_stagger_knockdown';
+  if (presentation.celebrating) return 'celebration';
   if (state.diving) return 'dive_tackle_lunge';
   if (isPassingQB) return 'pass_windup_throw';
   if (state.engaged && Math.hypot(state.vx, state.vy) < 0.3) return 'idle_stance';
@@ -129,9 +154,10 @@ export function runFrameIndex(distanceAccum: number, strideLength = 1.6): number
 
 /**
  * Resolve the exact cell to draw for a live actor. `frameAccum` is the actor's
- * distance travelled (used only for run playback), `timeAccum` seconds for
- * non-run one-shots (idle/dive/knockdown/celebrate), and `passingQB` flags the
- * QB mid-windup.
+ * distance travelled (used only for run playback); `timeAccum` seconds since the
+ * actor's *current animation* began (so a freshly started dive/throw/knockdown
+ * starts on frame 0, not an arbitrary mid-animation frame); `passingQB` flags
+ * the QB mid-windup; `presentation` carries scene-side terminal state.
  */
 export function resolveActorCell(
   state: LiveActorState,
@@ -139,8 +165,9 @@ export function resolveActorCell(
   frameAccum: number,
   timeAccum: number,
   passingQB = false,
+  presentation: ActorPresentationState = {},
 ): SpriteCell {
-  const anim = baseAnimation(state, passingQB);
+  const anim = baseAnimation(state, passingQB, presentation);
   if (anim === 'run_8dir') {
     const facing = runFacingFromVelocity(state.vx, state.vy);
     const row = ANIMATION_SPEC.run_8dir.firstRow + RUN_DIR_ORDER.indexOf(facing);
@@ -153,7 +180,7 @@ export function resolveActorCell(
     };
   }
   const spec = ANIMATION_SPEC[anim];
-  // One-shot/looping non-run frames tick on time; cycle idle/celebrate, hold
+  // One-shot/looping non-run frames tick on time; cycle idle/celebration, hold
   // terminal frames on the last cell.
   const cycle = anim === 'casualty_death' || anim === 'hit_stagger_knockdown';
   const fps = 8;

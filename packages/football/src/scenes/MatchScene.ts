@@ -17,7 +17,7 @@ import {
 } from '@monster-league/shared-core';
 import { GameSession, type Slot } from '../sim/index';
 import { buildLivePlayInput, projectActor } from '../field/fieldMapper';
-import { LivePlay, type LiveActorState, type LivePlayResult } from '../field/LivePlay';
+import { LivePlay, LIVE_TUNING, type LiveActorState, type LivePlayResult } from '../field/LivePlay';
 import { HazardManager } from '../field/HazardManager';
 import { resolvePassAttempt, resolveScrambleOutcome } from '../field/PlayOrchestrator';
 import { styleForHold } from '../field/Ballistics';
@@ -29,8 +29,13 @@ import {
   REF_SHEET_NECRO,
   REF_SHEET_DEMON,
   SPRITE_CELL,
+  SHEET_WIDTH,
+  SHEET_HEIGHT,
   resolveActorCell,
+  baseAnimation,
   sheetKey,
+  type ActorAnimation,
+  type ActorPresentationState,
 } from './spriteRenderer';
 
 export const CANVAS_WIDTH = 640;
@@ -115,6 +120,7 @@ export class MatchScene extends Phaser.Scene {
 
   private fieldGfx!: Phaser.GameObjects.Graphics;
   private indicatorGfx!: Phaser.GameObjects.Graphics;
+  private groundGfx!: Phaser.GameObjects.Graphics;
   private actorsLayer!: Phaser.GameObjects.Container;
   private readyText!: Phaser.GameObjects.Text;
 
@@ -123,6 +129,17 @@ export class MatchScene extends Phaser.Scene {
   private awaySheet = '';
   /** Per-actor accumulated distance travelled (run frames advance on it). */
   private runDist = new Map<string, number>();
+  /** Previous fixed-step position per actor, for distance-based frame advance. */
+  private lastPos = new Map<string, { x: number; y: number }>();
+  /** Per-actor seconds since its *current* animation began (one-shots/loops). */
+  private animClock = new Map<string, number>();
+  /** Per-actor current animation (to detect transitions and restart the clock). */
+  private animKind = new Map<string, ActorAnimation>();
+  /** Scene-side terminal status per actor id (death/knockdown/celebration). */
+  private presentation = new Map<string, ActorPresentationState>();
+  /** The first-down target field-x captured at snap (survives `snap()` mutating
+   *  `session.yardsToGo` during the banner). */
+  private firstDownFieldX = 0;
   /** Count of sprite-backed actors (14 + referee) rendered last frame. */
   private spriteBackedActorCount = 0;
   /** Hazard terrain drawn on its own layer above the static field so mines that
@@ -263,6 +280,10 @@ export class MatchScene extends Phaser.Scene {
 
     // Actors render as small tinted rectangles on a container rebuilt each frame.
     this.actorsLayer = this.add.container(0, 0);
+    // Ground indicators (LOS/first-down lines, selection ring, stamina arc) render
+    // UNDER the actors, so they never cover a sprite; airborne ball, kick meter and
+    // pass reticles stay on `indicatorGfx` above.
+    this.groundGfx = this.add.graphics();
     this.indicatorGfx = this.add.graphics();
 
     this.readyText = this.add
@@ -407,6 +428,24 @@ export class MatchScene extends Phaser.Scene {
     this.highlightDefender = -1;
     this.simAccumulator = 0;
     this.runDist.clear();
+    this.lastPos.clear();
+    // Reset per-down presentation state *before* the formation's first render so
+    // a pass play that ended in a tackle (windows still open) never leaks its
+    // throwing-QB / receiver-badge state into the next formation's idle actors.
+    this.animClock.clear();
+    this.animKind.clear();
+    this.presentation.clear();
+    this.windowsOpen = false;
+    this.windowOpenPressConsumed = false;
+    this.ballFlight = null;
+    this.damagePopups = [];
+    this.casualties = [];
+    this.looseBall = null;
+    // Capture the starting first-down target now; `snap()` mutates
+    // `session.yardsToGo` when the result commits, which would otherwise drag the
+    // amber line during the banner while the actors + LOS stay frozen. The
+    // projector adds the 10-yard end-zone offset, so convert here as well.
+    this.firstDownFieldX = this.liveLos + this.session.yardsToGo + 10;
   }
 
   private beginLivePlay(): void {
@@ -428,6 +467,11 @@ export class MatchScene extends Phaser.Scene {
     this.liveElapsed = 0;
     this.nastySnap = null;
     this.gasCloud = null;
+    // Nasties are *selected* during PRE_SNAP (`session.callNasty`), after the pick
+    // already primed the field effects at `prepareLivePlay()`. Reinitialize at snap
+    // from the final pre-snap selection so a Dynamite Pitch arms its grenade count
+    // and Hex/Shroud arm their timers instead of staying at their pick-time zeroes.
+    this.nastyFields.begin(this.session.effects);
     // Entering the live down is part of building it: both the KeyC pre-snap path
     // and the e2e debug handle call `beginLivePlay()` directly, and both must land
     // in LIVE with a populated `this.live` (otherwise `updateLive` early-returns
@@ -614,6 +658,19 @@ export class MatchScene extends Phaser.Scene {
         }
       }
       if (outcome.kind === 'WHISTLE') break;
+
+      // Accumulate actual distance travelled this fixed step (before the next
+      // command overwrites positions) so run-frame playback advances with real
+      // ground covered — not velocity × rendered frame, which runs fast at high
+      // refresh and keeps counting during hit-stop/ball-flight/banner freezes.
+      for (const a of live.snapshot().actors) {
+        const prev = this.lastPos.get(a.id);
+        if (prev) {
+          const d = this.runDist.get(a.id) ?? 0;
+          this.runDist.set(a.id, d + Math.hypot(a.x - prev.x, a.y - prev.y));
+        }
+        this.lastPos.set(a.id, { x: a.x, y: a.y });
+      }
     }
 
     if (live.snapshot().outcome.kind === 'WHISTLE') {
@@ -835,6 +892,11 @@ export class MatchScene extends Phaser.Scene {
       const f = projectActor(actor.x, actor.y, this.liveLos);
       const s = projectToScreen(f.x, f.y);
       this.casualties.push({ id: c.playerId, x: s.x, y: s.y, ttl: 2.0 });
+      // Presentation: a casualty kills the victim — the sprite plays its death
+      // pose while the red/bone bloom settles (Colour commentary handles the rest).
+      const pres = this.presentation.get(c.playerId) ?? {};
+      pres.dead = true;
+      this.presentation.set(c.playerId, pres);
     }
     if (r.fumble) {
       const carrier = this.live?.carrier;
@@ -891,6 +953,27 @@ export class MatchScene extends Phaser.Scene {
     const res = this.session.snap(snap as Parameters<GameSession['snap']>[0]);
     this.showBanner(res.banner);
     this.collectDamageAndCasualties();
+
+    // Presentation for the play-over roll: the tackled carrier drops into a
+    // knockdown, the scoring carrier celebrates, and the tackler celebrates the
+    // stop. These persist only until the next down's formation is prepared.
+    const carrierId = this.live?.carrier.id;
+    if (carrierId) {
+      const pres = this.presentation.get(carrierId) ?? {};
+      if (r.touchdown) pres.celebrating = true;
+      else if (r.tackler) pres.downed = true;
+      this.presentation.set(carrierId, pres);
+    }
+    if (r.tackler) {
+      // `r.tackler` is the tackler's *slot*; resolve the actor id so the
+      // celebration lands on the right sprite.
+      const tackler = this.live?.actors.find((a) => a.slot === r.tackler && a.side === 'DEFENSE');
+      if (tackler) {
+        const tacklerPres = this.presentation.get(tackler.id) ?? {};
+        tacklerPres.celebrating = true;
+        this.presentation.set(tackler.id, tacklerPres);
+      }
+    }
   }
 
   private updateBanner(dt: number): void {
@@ -936,40 +1019,39 @@ export class MatchScene extends Phaser.Scene {
 
   /**
    * Tiled arena turf + end-zone sprites under the line-work. The home faction's
-   * arena (REAPERS → cursed_graveyard) supplies the 64×64 tiles; each tile is
-   * stretched into the projected quad and drawn with nearest-neighbour so the
-   * pixel texture stays crisp at 1x.
+   * arena (REAPERS → cursed_graveyard) supplies the 64×64 tiles. Because the
+   * projection is a perspective trapezoid, each field region (two end zones and
+   * the field of play between them) is drawn as its **own** horizontal band:
+   * the band's left/right edges come from the region's *projected* near corners,
+   * so the three regions sit side-by-side instead of overlapping one rectangle.
    */
   private drawFieldSprites(): void {
     const turf = 'cursed_graveyard_turf';
     const endzone = 'cursed_graveyard_endzone';
     if (!this.textures.exists(turf)) return;
 
-    const near = CANVAS_WIDTH / 2;
-    const far = projectToScreen(0, 0).x;
-    const drawQuad = (x0: number, x1: number, key: string, depth: number) => {
-      const tl = projectToScreen(x0, 0);
-      const br = projectToScreen(x1, 53);
-      const img = this.add.image(0, 0, key).setOrigin(0, 0).setDepth(depth);
-      // Approximate the perspective quad with a full-bleed image scaled to the
-      // quad's bounding box; the field is a trapezoid, so we crop via the
-      // projected corners. This is a flat backdrop — the precise parallax comes
-      // from the actors' own projection, not the turf texture.
-      img.setPosition(far, tl.y);
-      img.setDisplaySize(near - far + CANVAS_WIDTH / 2, br.y - tl.y);
-      img.setTexture(key);
+    // Each region occupies a horizontal band of the trapezoid: left/right from
+    // the projected near edge (widest), full screen height top→near edge.
+    const drawRegion = (x0: number, x1: number, key: string, depth: number) => {
+      const nl = projectToScreen(x0, 53).x;
+      const nr = projectToScreen(x1, 53).x;
+      const img = this.add.image(nl, 0, key).setOrigin(0, 0).setDepth(depth);
+      img.setDisplaySize(nr - nl, CANVAS_HEIGHT);
       return img;
     };
 
-    drawQuad(0, 10, endzone, -1);
-    drawQuad(10, 110, turf, -1);
-    drawQuad(110, 120, endzone, -1);
+    drawRegion(0, 10, endzone, -1);
+    drawRegion(10, 110, turf, -1);
+    drawRegion(110, 120, endzone, -1);
   }
 
   /** Draw the static 2.5D gridiron line-work + markings once. */
   private drawField(g: DrawSurface): void {
-    g.fillStyle(toPhaserColor('VOID_BLACK'), 1);
-    g.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    // NOTE: no opaque backdrop is painted here. The game config sets
+    // `backgroundColor: VOID_BLACK`, which fills every pixel the depth -1 arena
+    // sprites don't cover. Painting an opaque rectangle on this Graphics layer's
+    // depth 0 would sit *above* those arena images and hide the turf. The
+    // line-work below is translucent and belongs above the turf.
 
     // End-zone tint quads (the turf/end-zone sprites fill them; these add a faint
     // faction-color wash). The field of play is now the turf sprite, so no quad here.
@@ -1028,11 +1110,13 @@ export class MatchScene extends Phaser.Scene {
 
   private drawYardNumber(g: DrawSurface, x: number): void {
     // Numbers sit *between* 10-yard lines (caller passes x = 15, 25, … 105), so
-    // snap to the nearest 10-yard line to derive the conventional yardage label,
-    // then take the nearer goal line (field x=10 vs x=110). x=15 → label "10",
-    // x=25 → "20", … x=105 → "10" (from the far goal).
-    const majorX = Math.round(x / 10) * 10;
-    const label = String(Math.min(majorX - 10, 110 - majorX));
+    // derive the label from the distance to the *nearer* goal line (x=10 vs
+    // x=110), rounded to the nearest 10-yard marker. Own half counts up from its
+    // goal, far half counts down from midfield toward its goal, and the 5-yard
+    // goal band reads "10" rather than "0". This keeps the labels symmetric:
+    // x=15→"10", x=55→"50", x=65→"40", x=105→"10".
+    const d = Math.min(x - 10, 110 - x);
+    const label = d < 10 ? '10' : String((x > 60 ? Math.floor(d / 10) : Math.ceil(d / 10)) * 10);
     const top = projectToScreen(x, 14);
     const bot = projectToScreen(x, 39);
     this.drawBlockText(g, label, top.x, top.y, top.scale);
@@ -1190,6 +1274,7 @@ export class MatchScene extends Phaser.Scene {
   /** Rebuild the actor sprites each frame, y-sorted, with shadows + indicators. */
   private drawActors(): void {
     this.actorsLayer.removeAll(true);
+    this.spriteBackedActorCount = 0;
     if (!this.live) return;
 
     const los = this.liveLos;
@@ -1211,14 +1296,6 @@ export class MatchScene extends Phaser.Scene {
         isHighlighted: hlId !== undefined && state.id === hlId,
       };
     });
-
-    // Accrue per-actor distance travelled for run-frame playback (feet do not
-    // slide): frame index is derived from metres covered, not wall time.
-    for (const a of actors) {
-      const d = this.runDist.get(a.state.id) ?? 0;
-      const step = Math.hypot(a.state.vx, a.state.vy) * (1 / 60);
-      this.runDist.set(a.state.id, d + step);
-    }
 
     // Ground indicators render under every actor. The LOS/first-down lines and
     // selection ring are drawn below the actors so they never cover a sprite.
@@ -1243,10 +1320,21 @@ export class MatchScene extends Phaser.Scene {
 
     // Passing windows float over eligible receivers while open (pass play).
     if (this.isPassPlay && this.windowsOpen && !this.ballFlight) this.drawPassWindows();
+  }
 
-    // Expose the sprite-backed actor count (14 + referee) for the e2e assertion
-    // that no actor renders as a flat rectangle.
-    this.spriteBackedActorCount = actors.length + 1;
+  /** Per-actor seconds since its current animation began, restarting the clock
+   *  whenever the animation changes (a fresh dive/throw/knockdown starts on
+   *  frame 0 rather than an arbitrary mid-animation frame). */
+  private animTime(id: string, anim: ActorAnimation): number {
+    const last = this.animKind.get(id);
+    if (last !== anim) {
+      this.animKind.set(id, anim);
+      this.animClock.set(id, 0);
+      return 0;
+    }
+    const t = (this.animClock.get(id) ?? 0) + LIVE_TUNING.dt;
+    this.animClock.set(id, t);
+    return t;
   }
 
   /** Draw one actor from its faction sprite sheet, nearest-neighbour, with a
@@ -1262,16 +1350,27 @@ export class MatchScene extends Phaser.Scene {
     // The QB shows a throw windup while a pass is armed and the ball is still
     // in his hands; every other actor runs/idles by velocity.
     const passingQB = a.isCarrier && this.isPassPlay && !this.ballFlight && this.windowsOpen;
-    const cell = resolveActorCell(s, sheet, frameAccum, this.liveElapsed, passingQB);
+    const presentation = this.presentation.get(s.id) ?? {};
+    const anim = baseAnimation(s, passingQB, presentation);
+    const cell = resolveActorCell(
+      s,
+      sheet,
+      frameAccum,
+      this.animTime(s.id, anim),
+      passingQB,
+      presentation,
+    );
 
-    // Cell 48×48 cropped from the sheet; `pixelArt: true` on the game config
-    // keeps scaling nearest-neighbour globally, so no per-sprite filter needed.
+    // Cell 48×48 shown from the full 288×672 sheet: size the WHOLE sheet to its
+    // projected footprint, then crop the 48×48 cell so the crop maps back to a
+    // full cell (not a sliver). `pixelArt: true` keeps scaling nearest-neighbour.
     const sp = this.add.image(a.px, a.py - 9 * a.scale, cell.sheet);
     sp.setOrigin(0.5, 1);
-    sp.setDisplaySize(SPRITE_CELL * a.scale, SPRITE_CELL * a.scale);
+    sp.setDisplaySize(SHEET_WIDTH * a.scale, SHEET_HEIGHT * a.scale);
     sp.setCrop(cell.col * SPRITE_CELL, cell.row * SPRITE_CELL, SPRITE_CELL, SPRITE_CELL);
     sp.setDepth(a.depth);
     this.actorsLayer.add(sp);
+    this.spriteBackedActorCount++;
 
     // Highlighted defender keeps its existing cyan outline cue (drawn under).
     if (a.isHighlighted) {
@@ -1307,10 +1406,11 @@ export class MatchScene extends Phaser.Scene {
     const idleCol = Math.floor(this.liveElapsed * 4) % 4;
     const ref = this.add.image(s.x, s.y - 9 * s.scale, sheet);
     ref.setOrigin(0.5, 1);
-    ref.setDisplaySize(SPRITE_CELL * s.scale, SPRITE_CELL * s.scale);
+    ref.setDisplaySize(SHEET_WIDTH * s.scale, SHEET_HEIGHT * s.scale);
     ref.setCrop(idleCol * SPRITE_CELL, 0, SPRITE_CELL, SPRITE_CELL);
     ref.setDepth(s.y);
     this.actorsLayer.add(ref);
+    this.spriteBackedActorCount++;
 
     const shadow = this.add.ellipse(s.x, s.y, 18 * s.scale, 6 * s.scale, 0x000000, 0.35);
     shadow.setDepth(s.y - 0.5);
@@ -1339,20 +1439,23 @@ export class MatchScene extends Phaser.Scene {
   }
 
   private drawIndicators(actors: RenderActor[]): void {
-    const g = this.indicatorGfx;
+    const g = this.groundGfx;
     g.clear();
 
     // Line of scrimmage (cyan) and first-down (amber) lines across the field.
-    // These render under the actors so they never cover a sprite.
-    const losTop = projectToScreen(this.liveLos, 0);
-    const losBot = projectToScreen(this.liveLos, 53);
+    // These render under the actors so they never cover a sprite. Field x is
+    // `10 + los` (10-yard end zone), matching `projectActor`'s offset.
+    const losFieldX = 10 + this.liveLos;
+    const losTop = projectToScreen(losFieldX, 0);
+    const losBot = projectToScreen(losFieldX, 53);
     g.lineStyle(2, toPhaserColor('SPECTRAL_CYAN'), 0.9);
     g.lineBetween(losTop.x, losTop.y, losBot.x, losBot.y);
 
-    const fdX = this.liveLos + this.session.yardsToGo;
-    if (fdX > this.liveLos && fdX < 110) {
-      const fdTop = projectToScreen(fdX, 0);
-      const fdBot = projectToScreen(fdX, 53);
+    // First-down target captured at snap (field-x, survives `snap()` rewriting
+    // `session.yardsToGo` during the banner).
+    if (this.firstDownFieldX > losFieldX && this.firstDownFieldX < 110) {
+      const fdTop = projectToScreen(this.firstDownFieldX, 0);
+      const fdBot = projectToScreen(this.firstDownFieldX, 53);
       g.lineStyle(2, toPhaserColor('HELLFIRE_AMBER'), 0.9);
       g.lineBetween(fdTop.x, fdTop.y, fdBot.x, fdBot.y);
     }
