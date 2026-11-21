@@ -235,6 +235,13 @@ export class MatchScene extends Phaser.Scene {
 
   constructor() {
     super('match');
+    // Expose the e2e/dev handle as soon as the scene object exists, not in
+    // `create()`: Phaser makes the canvas visible at the *start* of `preload`,
+    // so gameplay specs that read `window.__mlf` right after the canvas appears
+    // would otherwise race the (slow) atlas/sprite-sheet load. The getters below
+    // are lazy and null-guarded, so they read correctly once `create()` populates
+    // `session`/`live` and safely report null/'' before then.
+    this.exposeDebugHandle();
   }
 
   // ------------------------------------------------------------- lifecycle
@@ -320,7 +327,6 @@ export class MatchScene extends Phaser.Scene {
     // overlay is hidden entirely.
     if (MatchScene.isProduction) this.readyText.setVisible(false);
 
-    this.exposeDebugHandle();
     this.refreshUi();
   }
 
@@ -1405,6 +1411,12 @@ export class MatchScene extends Phaser.Scene {
     // reticles and any previous frame's in-flight ball / bloom markers do not
     // accumulate into permanent trails (and a growing command buffer).
     this.indicatorGfx.clear();
+    // The ground layer holds down-transient marks (LOS/first-down lines, carrier
+    // ring/stamina arc) that must die with the play. It is normally cleared at the
+    // top of `drawIndicators`, but that runs *after* the `!this.live` early return.
+    // Clear it here too so a banner→huddle transition (`live = null`) cannot leave
+    // the previous down's scrimmage line / carrier ring frozen on the field.
+    this.groundGfx.clear();
     if (!this.live) return;
 
     const los = this.liveLos;
@@ -1883,31 +1895,36 @@ export class MatchScene extends Phaser.Scene {
   // ------------------------------------------------------------- debug handle
 
   private exposeDebugHandle(): void {
-    const session = () => this.session;
+    // `session`/`hazardManager`/`lastResult` are populated in `create()`, which
+    // runs *after* `preload`; this handle is installed in the constructor (before
+    // the canvas is even on screen). Null-guard every session-backed getter so a
+    // spec that reads `window.__mlf.phase` mid-preload gets a calm `null`/`''`
+    // instead of a TypeError, then the real value once the scene boots.
+    const session = () => this.session ?? null;
     const live = () => this.live;
     const mode = () => this.mode;
     const isPassPlay = () => this.isPassPlay;
     const windowsOpen = () => this.windowsOpen;
     const selectedPlay = () => this.selectedPlayIndex;
-    const lastResult = () => this.session.lastResult;
+    const lastResult = () => this.session?.lastResult ?? null;
     const hazardManager = () => this.hazardManager;
     const spriteBackedActors = () => this.spriteBackedActorCount;
     (window as unknown as Record<string, unknown>).__mlf = {
       session: session(),
       get phase() {
-        return session().phase;
+        return session()?.phase ?? '';
       },
       get mode() {
         return mode();
       },
       get score() {
-        return session().score;
+        return session()?.score ?? null;
       },
       get los() {
-        return session().los;
+        return session()?.los ?? null;
       },
       get down() {
-        return session().down;
+        return session()?.down ?? null;
       },
       get carrierId() {
         return live()?.carrier.id ?? null;
@@ -1928,7 +1945,7 @@ export class MatchScene extends Phaser.Scene {
         return lastResult()?.casualties.length ?? 0;
       },
       get hazards() {
-        return hazardManager().snapshot();
+        return hazardManager()?.snapshot() ?? [];
       },
       get actors() {
         return (
