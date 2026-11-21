@@ -97,7 +97,10 @@ test('captures the pass-in-flight screenshot', async ({ page }) => {
   await page.waitForTimeout(300);
   await page.evaluate(() => window.__mlf!.throwTo('A'));
   await page.waitForTimeout(150);
-  writeFileSync(join(OUT, 'football-pass.png'), await page.screenshot());
+  // Distinct filename: `football-pass-hazard.spec.ts` writes `football-pass.png`
+  // *after* the banner, so a shared path would let that suite overwrite this
+  // genuinely in-flight capture (or vice-versa).
+  writeFileSync(join(OUT, 'football-pass-inflight.png'), await page.screenshot());
 });
 
 test('captures the tackle screenshot', async ({ page }) => {

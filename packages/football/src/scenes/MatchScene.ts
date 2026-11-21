@@ -439,6 +439,11 @@ export class MatchScene extends Phaser.Scene {
     this.nastyFields.begin(this.session.effects);
     const input = buildLivePlayInput(this.session, play.id, DEFAULT_DEFENSE, 0x9e3779b9);
     this.live = new LivePlay(input);
+    // Initialize ball presentation ownership at formation time too: the opening
+    // PRE_SNAP formation is rendered before `beginLivePlay()` runs, and anchoring
+    // the ball to the live carrier here means a prior down's holder can't leak
+    // into (or vanish from) this formation.
+    this.ballHolderId = this.live.carrier.id;
     this.liveResult = null;
     this.highlightDefender = -1;
     this.simAccumulator = 0;
@@ -1088,6 +1093,10 @@ export class MatchScene extends Phaser.Scene {
       // corners, drawn as two triangles like `perspectiveQuad`). Canvas renderer
       // supports geometry masks; the mask Graphics is invisible (draw-only).
       const maskGfx = this.add.graphics();
+      // A geometry mask Graphics object is still a visible scene object; hide its
+      // own rendering so the opaque triangles never cover the turf/markings while
+      // still clipping the tile sprite to the region's projected trapezoid.
+      maskGfx.setVisible(false);
       maskGfx.fillStyle(0xffffff, 1);
       maskGfx.fillTriangle(farL.x, farL.y, farR.x, farR.y, nearR.x, nearR.y);
       maskGfx.fillTriangle(farL.x, farL.y, nearR.x, nearR.y, nearL.x, nearL.y);
@@ -1425,7 +1434,10 @@ export class MatchScene extends Phaser.Scene {
     // sprite's feet sit exactly at the projected position (and stay there across
     // frame changes instead of drifting with the full sheet's 288×672 bounds).
     const frameIndex = cell.row * SPRITE_COLS + cell.col;
-    const sp = this.add.image(a.px, a.py - 9 * a.scale, cell.sheet, frameIndex);
+    // Anchor the artwork's baseline (row-44 feet) to the projected ground point:
+    // a bottom-centre origin plus a small downward offset keeps the feet in the
+    // ground shadow instead of floating 13 scaled pixels above it.
+    const sp = this.add.image(a.px, a.py + 4 * a.scale, cell.sheet, frameIndex);
     sp.setOrigin(0.5, 1);
     sp.setScale(a.scale);
     sp.setDepth(a.depth);
@@ -1461,14 +1473,16 @@ export class MatchScene extends Phaser.Scene {
     const sheet = this.session.ref.kind === 'DEMON_REF' ? REF_SHEET_DEMON : REF_SHEET_NECRO;
     if (!this.textures.exists(sheet)) return;
 
-    // Stand on the near sideline, just behind the line of scrimmage.
-    const f = projectActor(-3, -24, los);
+    // Stand on the near sideline, just behind the line of scrimmage. `projectActor`
+    // centres the field at lateral 26.5, so a *positive* offset puts the referee on
+    // the near (bottom) sideline; negative would push the 48px frame off the far edge.
+    const f = projectActor(-3, 24, los);
     const s = projectToScreen(f.x, f.y);
     // Idle stance (row 0); cycle the idle frames slowly on the sim clock. The
     // selected cell is a registered 48×48 frame (row-major index), origin anchored
     // to the cell's bottom-centre just like every field actor.
     const idleCol = Math.floor(this.liveElapsed * 4) % 4;
-    const ref = this.add.image(s.x, s.y - 9 * s.scale, sheet, idleCol);
+    const ref = this.add.image(s.x, s.y + 4 * s.scale, sheet, idleCol);
     ref.setOrigin(0.5, 1);
     ref.setScale(s.scale);
     ref.setDepth(s.y);
