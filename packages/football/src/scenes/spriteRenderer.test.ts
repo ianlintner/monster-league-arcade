@@ -140,6 +140,17 @@ describe('resolveActorCell', () => {
     expect(cell.col).toBe(ANIMATION_SPEC.dive_tackle_lunge.frames - 1);
   });
 
+  it('flips a leftward dive to match its travel direction', () => {
+    // The dive row is generated facing right only; a negative vx (heading back
+    // toward the carrier's own goal) must mirror it so the lunge isn't feet-first.
+    expect(
+      resolveActorCell(actor({ diving: true, vx: -3 }), FACTION_SHEET.REAPERS, 0, 0).flipX,
+    ).toBe(true);
+    expect(
+      resolveActorCell(actor({ diving: true, vx: 3 }), FACTION_SHEET.REAPERS, 0, 0).flipX,
+    ).toBeUndefined();
+  });
+
   it('holds the cocked aim frame without cycling into the release', () => {
     // The aim pose must stay on frame 1 (arm drawn back, ball in hand) while the
     // player picks a target — never advance to the release pose (col 3) until a

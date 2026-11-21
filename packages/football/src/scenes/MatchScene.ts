@@ -1499,6 +1499,7 @@ export class MatchScene extends Phaser.Scene {
     sp.setOrigin(0.5, 1);
     sp.setScale(a.scale);
     sp.setDepth(a.depth);
+    if (cell.flipX) sp.setFlipX(true);
     this.actorsLayer.add(sp);
     this.spriteBackedActorCount++;
 

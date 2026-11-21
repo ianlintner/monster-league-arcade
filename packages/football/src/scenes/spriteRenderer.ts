@@ -73,6 +73,8 @@ export interface SpriteCell {
   animation: ActorAnimation;
   /** True when this is a run frame advanced by distance (frame index drives playback). */
   facing?: RunDir;
+  /** True to mirror the cell horizontally (leftward dive, artwork faces right). */
+  flipX?: boolean;
 }
 
 /**
@@ -192,6 +194,13 @@ export function resolveActorCell(
   // frame (like the terminal animations) keeps the lunge from snapping back to
   // its starting pose before it completes.
   //
+  // The dive row is generated facing right only (`dirX: 1` in generate-art.mjs),
+  // so a leftward dive (`vx < 0`, the carrier heading back toward its own goal)
+  // must be mirrored to keep the lunge headed the way the ball carrier travels
+  // rather than feet-first. `flipX` is consumed by `MatchScene.drawActor` via
+  // `setFlipX`; flipping across the bottom-centre origin keeps the feet planted.
+  const flipX = anim === 'dive_tackle_lunge' && state.vx < 0;
+  //
   // `pass_aim` is a *cocked aim*: hold the QB's wind-up frame (frame 1, the arm
   // drawn back) while the player chooses a target — it must NOT cycle into the
   // release pose every 0.5 s without a throw. `pass_aim_throw` is the one-shot
@@ -213,7 +222,7 @@ export function resolveActorCell(
   )
     col = Math.min(frame, spec.frames - 1);
   else col = frame % spec.frames;
-  return { sheet, row: spec.firstRow, col, animation: anim };
+  return { sheet, row: spec.firstRow, col, animation: anim, flipX: flipX || undefined };
 }
 
 /** Faction id → home or away sheet path (`.png` files under sprites/). */
