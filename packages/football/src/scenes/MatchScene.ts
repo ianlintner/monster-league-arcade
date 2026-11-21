@@ -19,7 +19,7 @@ import { GameSession, type Slot } from '../sim/index';
 import { buildLivePlayInput, projectActor } from '../field/fieldMapper';
 import { LivePlay, type LiveActorState, type LivePlayResult } from '../field/LivePlay';
 import { HazardManager } from '../field/HazardManager';
-import { resolvePassAttempt } from '../field/PlayOrchestrator';
+import { resolvePassAttempt, resolveScrambleOutcome } from '../field/PlayOrchestrator';
 import { styleForHold } from '../field/Ballistics';
 import { NastyFieldEffects } from '../field/NastyFieldEffects';
 import { resolveKick, meterValue, KICK_METER } from '../field/KickMeter';
@@ -801,33 +801,21 @@ export class MatchScene extends Phaser.Scene {
     // Tackle damage: the tackler's rating naively scales a base hit.
     if (r.tackler) snap.force.tackleDamage = 6 + Math.floor(8 * 0.5);
 
-    // Pass plays that end with the QB still behind the LOS must be committed as a
-    // sack (tackled) or an explicit incomplete (scrambled out of bounds) rather than
-    // letting `rawPlay()` roll a fresh pass outcome that turns a visible tackle into
-    // a completion/interception and applies the tackle to a receiver. Only when the
-    // QB is actually still behind (or on) the line of scrimmage is it a sack/erased
-    // gain: a QB who scrambled *past* the LOS and is then tackled or steps out of
-    // bounds keeps the positive gain (the original yardage, not a clamped zero).
-    //
-    // A QB who scrambles past the LOS never threw the ball (this path only runs when
-    // no pass is in flight), so it must be recorded as a *run* with the QB as the
-    // carrier — committing a plain yards override would still let `rawPlay()` roll a
-    // fresh pass outcome and turn the gain into an incompletion or a turnover.
+    // Pass plays that end at the whistle with no ball in flight are a QB scramble:
+    // the QB never threw, so the down must be committed as a sack (tackled behind
+    // the LOS), an incomplete (out of bounds behind the LOS, preserving the measured
+    // loss so the next snap backs up the actual distance), or a run with the QB as
+    // carrier (past the LOS, keeping the positive gain). Delegating to the pure
+    // `resolveScrambleOutcome` keeps this scene→session mapping unit-testable.
     if (this.isPassPlay && r.outcome.kind === 'WHISTLE') {
-      const behindLos = yards <= 0;
-      if (r.outcome.reason === 'TACKLE' && behindLos) {
-        snap.force.sacked = true;
-        snap.force.yards = yards;
-      } else if (r.outcome.reason === 'OUT_OF_BOUNDS' && behindLos) {
-        // A scrambled QB who steps out of bounds behind the LOS is an incomplete pass,
-        // not a new snap with random air yardage. Past the LOS the gain is preserved.
-        snap.force.sacked = true;
-        snap.force.yards = 0;
-      } else if (yards > 0) {
-        // Positive-yard QB scramble: keep the gain, QB as carrier, recorded as a run.
-        snap.force.qbRun = true;
-        snap.force.yards = yards;
-      }
+      const scramble = resolveScrambleOutcome({
+        finalX: r.finalX,
+        outOfBounds: r.outOfBounds,
+        outcome: r.outcome,
+      });
+      if (scramble.sacked) snap.force.sacked = true;
+      if (scramble.qbRun) snap.force.qbRun = true;
+      snap.force.yards = scramble.yards;
     }
 
     if (this.pendingHazardHits.length > 0) snap.hazards = [...this.pendingHazardHits];

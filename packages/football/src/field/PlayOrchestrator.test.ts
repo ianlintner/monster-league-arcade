@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { resolvePassAttempt, resolveTackleAttempt } from './PlayOrchestrator';
+import {
+  resolvePassAttempt,
+  resolveTackleAttempt,
+  resolveScrambleOutcome,
+} from './PlayOrchestrator';
 
 describe('PlayOrchestrator — pass resolution', () => {
   const attempt = {
@@ -117,5 +121,61 @@ describe('PlayOrchestrator — tackle resolution', () => {
       5,
     );
     expect(snap.force?.fumble).toBe(true);
+  });
+});
+
+describe('PlayOrchestrator — scramble resolution', () => {
+  const whistle = (reason: 'TACKLE' | 'OUT_OF_BOUNDS' | 'SCORE') => ({
+    kind: 'WHISTLE' as const,
+    reason,
+  });
+
+  it('a QB tackled behind the LOS is a sack preserving the measured loss', () => {
+    const r = resolveScrambleOutcome({
+      finalX: -3,
+      outOfBounds: false,
+      outcome: whistle('TACKLE'),
+    });
+    expect(r.sacked).toBe(true);
+    expect(r.qbRun).toBeUndefined();
+    expect(r.yards).toBe(-3);
+  });
+
+  it('a QB out of bounds behind the LOS preserves the measured loss (not zero)', () => {
+    // Exiting three yards behind the line must back the next snap up three yards,
+    // not zero — the regression this whole block guards against.
+    const r = resolveScrambleOutcome({
+      finalX: -3,
+      outOfBounds: true,
+      outcome: whistle('OUT_OF_BOUNDS'),
+    });
+    expect(r.sacked).toBe(true);
+    expect(r.yards).toBe(-3);
+  });
+
+  it('a QB tackled past the LOS is a run with the QB as carrier, keeping the gain', () => {
+    const r = resolveScrambleOutcome({ finalX: 6, outOfBounds: false, outcome: whistle('TACKLE') });
+    expect(r.qbRun).toBe(true);
+    expect(r.sacked).toBeUndefined();
+    expect(r.yards).toBe(6);
+  });
+
+  it('a QB out of bounds past the LOS keeps the gain as a run', () => {
+    const r = resolveScrambleOutcome({
+      finalX: 4,
+      outOfBounds: true,
+      outcome: whistle('OUT_OF_BOUNDS'),
+    });
+    expect(r.qbRun).toBe(true);
+    expect(r.yards).toBe(4);
+  });
+
+  it('a zero-yard tackle at the LOS is a zero-yard sack', () => {
+    // `behindLos` is `yards <= 0`, so a tackle exactly at the line of scrimmage is
+    // still a sack — just with no yardage lost.
+    const r = resolveScrambleOutcome({ finalX: 0, outOfBounds: false, outcome: whistle('TACKLE') });
+    expect(r.sacked).toBe(true);
+    expect(r.qbRun).toBeUndefined();
+    expect(r.yards).toBe(0);
   });
 });

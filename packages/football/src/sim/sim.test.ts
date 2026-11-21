@@ -251,6 +251,20 @@ describe('downs, clock & scoring', () => {
     expect(r.turnover).toBe(false);
     expect(g.possession).toBe('home');
   });
+  it('a QB out of bounds behind the LOS preserves the measured loss (scene→session)', () => {
+    // The scene maps a behind-LOS out-of-bounds scramble to `sacked: true` with the
+    // measured (negative) yardage. Exiting three yards behind the line must back the
+    // next snap up three yards — not zero — and must not flip possession.
+    const g = start();
+    setup(g, 'QUICK_SLANTS');
+    const before = g.los;
+    const r = g.snap({ force: { yards: -3, sacked: true, outOfBounds: true } });
+    expect(r.kind).toBe('SACK');
+    expect(r.yards).toBe(-3);
+    expect(g.los).toBe(before - 3);
+    expect(g.possession).toBe('home');
+    expect(r.turnover).toBe(false);
+  });
   it('clock: quarters, halftime, timeouts reset, game end', () => {
     const g = start(3, { quarterSeconds: 10 });
     expect(g.callTimeout('home')).toBe(true);

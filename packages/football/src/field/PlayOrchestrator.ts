@@ -8,6 +8,8 @@
  *     interception vs deflection resolution (via `resolvePass`).
  *   - tackle: damage dealt (`tackleDamage`) and whether the hit forces a fumble
  *     (via `resolveFumble` → `force.fumble`).
+ *   - scramble: how a pass play that ended at the whistle (no ball in flight)
+ *     is committed — sack, incomplete, or a QB run (via `resolveScrambleOutcome`).
  *
  * Pure TypeScript, deterministic under a seed, no Phaser. MatchScene drives the
  * fields with live inputs and reads the derived `snap` args once the down ends.
@@ -119,4 +121,36 @@ export function resolveTackleAttempt(
     return { force: { tackleDamage: attempt.damage } };
   }
   return { force: { tackleDamage: attempt.damage } };
+}
+
+/**
+ * Classify how a pass play that ended at the whistle (no ball in flight) should
+ * be committed to the sim, based on the live carrier's final position and how
+ * the down ended. Returns the `force` overrides to merge into `snap()`.
+ *
+ * The live carrier's `finalX` is downfield yards from the line of scrimmage
+ * (negative = loss). A QB who never threw the ball is a *run*, not a pass:
+ *   - tackled behind the LOS  → sack, preserving the measured loss;
+ *   - out of bounds behind LOS → incomplete, preserving the measured loss so the
+ *     next snap backs up the actual distance (e.g. -3 yards, not 0);
+ *   - past the LOS (either way) → a run with the QB as carrier, keeping the gain.
+ */
+export function resolveScrambleOutcome(result: {
+  finalX: number;
+  outOfBounds: boolean;
+  outcome: { kind: 'WHISTLE'; reason: 'TACKLE' | 'OUT_OF_BOUNDS' | 'SCORE' };
+}): { sacked?: boolean; qbRun?: boolean; yards: number } {
+  const yards = result.finalX;
+  const behindLos = yards <= 0;
+  if (result.outcome.reason === 'TACKLE' && behindLos) {
+    return { sacked: true, yards };
+  }
+  if (result.outcome.reason === 'OUT_OF_BOUNDS' && behindLos) {
+    return { sacked: true, yards };
+  }
+  if (yards > 0) {
+    return { qbRun: true, yards };
+  }
+  // Zero-yard whistle (e.g. tackled exactly at the LOS): no gain, no sack flag.
+  return { yards };
 }
