@@ -984,7 +984,9 @@ export class MatchScene extends Phaser.Scene {
   private renderKineticBanner(text: string): void {
     const host = document.getElementById('banner');
     if (!host) return;
-    host.replaceChildren(buildBroadcastBanner(this.bannerKind, detailForKind(this.bannerKind, text)));
+    host.replaceChildren(
+      buildBroadcastBanner(this.bannerKind, detailForKind(this.bannerKind, text)),
+    );
   }
 
   /** Read the just-committed snap's damage/casualties into floating popups. */
@@ -1942,9 +1944,9 @@ export class MatchScene extends Phaser.Scene {
    * Idempotent and null-guarded so it is safe to call every rendered frame.
    */
   private syncHud(): void {
-    const root = document.querySelector('.gsn-scorebug-shell') ?? document.querySelector(
-      '[data-testid="scorebug"]',
-    );
+    const root =
+      document.querySelector('.gsn-scorebug-shell') ??
+      document.querySelector('[data-testid="scorebug"]');
     if (!root) return;
     const s = this.session;
 
@@ -1964,9 +1966,10 @@ export class MatchScene extends Phaser.Scene {
     const down = root.querySelector('.gsn-scorebug__down');
     if (down) down.textContent = downDistanceLabel(s.down, s.yardsToGo);
     const los = root.querySelector('.gsn-scorebug__los');
-    if (los) los.textContent = `BALL ON ${s.possession === 'home' ? 'OPP' : 'OWN'} ${
-      s.possession === 'home' ? 100 - s.los : s.los
-    }`;
+    if (los)
+      los.textContent = `BALL ON ${s.possession === 'home' ? 'OPP' : 'OWN'} ${
+        s.possession === 'home' ? 100 - s.los : s.los
+      }`;
 
     // Bribed-ref badge.
     const bribe = root.querySelector('[data-testid="bribe-badge"]');
@@ -1997,10 +2000,11 @@ export class MatchScene extends Phaser.Scene {
       formation: p.kind === 'PASS' ? 'SHOTGUN' : 'I-FORM',
     }));
     const formations = [...new Set(plays.map((p) => p.formation))];
-    const availableNasties = this.session.charges.remaining(this.session.possession, this.session.half);
-    host.replaceChildren(
-      buildHuddleOverlay({ formations, plays, availableNasties }),
+    const availableNasties = this.session.charges.remaining(
+      this.session.possession,
+      this.session.half,
     );
+    host.replaceChildren(buildHuddleOverlay({ formations, plays, availableNasties }));
     host.hidden = false;
   }
 

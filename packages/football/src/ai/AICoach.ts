@@ -138,10 +138,7 @@ function chooseDefensePlay(s: CoachSituation, guessedRun: boolean): string {
  *   6. On defense, counter a likely pass → PHANTOM_SHROUD / HEX_OF_CONFUSION.
  *   7. Tight game late → BRIBE_REF for a corrupt edge.
  */
-function chooseNasty(
-  s: CoachSituation,
-  offenseIsRun: boolean,
-): NastyKind | null {
+function chooseNasty(s: CoachSituation, offenseIsRun: boolean): NastyKind | null {
   const can = (k: NastyKind): boolean => s.availableNasties.includes(k);
 
   if (!s.demonRefActive) {
@@ -167,7 +164,13 @@ function chooseNasty(
   }
 
   // Late tight-game corrupt edge: bribe to manufacture a flag against the foe.
-  if (!s.demonRefActive && !s.refBribedAgainst && can('BRIBE_REF') && s.quarter >= 3 && scoreDiff(s) <= 0) {
+  if (
+    !s.demonRefActive &&
+    !s.refBribedAgainst &&
+    can('BRIBE_REF') &&
+    s.quarter >= 3 &&
+    scoreDiff(s) <= 0
+  ) {
     return 'BRIBE_REF';
   }
 
@@ -187,9 +190,7 @@ export function decideCoachPlay(s: CoachSituation): CoachDecision {
   // Whether the upcoming snap is a run, from the AI's perspective:
   //  - on offense: from the play it actually called,
   //  - on defense: a situational guess (short yardage or goal line ⇒ likely run).
-  const offKind = s.aiIsOffense
-    ? getOffensePlay(offensePlayId).kind
-    : guessOffenseKind(s);
+  const offKind = s.aiIsOffense ? getOffensePlay(offensePlayId).kind : guessOffenseKind(s);
   const offenseIsRun = offKind === 'RUN' || offKind === 'PUNT';
   const defensePlayId = chooseDefensePlay(s, offenseIsRun);
 

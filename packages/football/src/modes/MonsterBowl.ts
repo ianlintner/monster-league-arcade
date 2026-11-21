@@ -101,9 +101,7 @@ export function recordSemifinal(
 }
 
 /** Get the championship matchup once both semifinals are resolved, else null. */
-export function championshipMatchup(
-  bowl: MonsterBowl,
-): [BracketTeam, BracketTeam] | null {
+export function championshipMatchup(bowl: MonsterBowl): [BracketTeam, BracketTeam] | null {
   const a = bowl.winners['semi-1'];
   const b = bowl.winners['semi-2'];
   if (!a || !b) return null;

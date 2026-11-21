@@ -99,7 +99,9 @@ function skullRow(team: 'home' | 'away', casualties: number): HTMLElement {
 /** Build the full top broadcast scorebug (crests, digits, clocks, down, skulls, bribe). */
 export function buildScorebug(state: HudState): HTMLElement {
   const wrap = el('div', 'gsn-scorebug');
-  wrap.setAttribute('data-testid', 'scorebug');
+  // NOTE: the outer `#scorebug` host (index.html) already carries the
+  // `data-testid="scorebug"`; the inner bar must not duplicate it or the e2e
+  // locator resolves to two elements.
 
   // Home cluster: crest + name + casualties.
   const home = el('div', 'gsn-scorebug__team');
@@ -187,10 +189,11 @@ export function buildHuddleOverlay(opts: {
   // Dirty tricks drawer.
   const drawer = el('div', 'gsn-huddle__drawer');
   drawer.setAttribute('data-testid', 'nasty-drawer');
-  const active = opts.availableNasties.length
-    ? opts.availableNasties.join(' · ')
-    : 'no charges';
-  drawer.append(el('span', 'gsn-huddle__drawer-label', 'DIRTY TRICKS'), el('span', undefined, active));
+  const active = opts.availableNasties.length ? opts.availableNasties.join(' · ') : 'no charges';
+  drawer.append(
+    el('span', 'gsn-huddle__drawer-label', 'DIRTY TRICKS'),
+    el('span', undefined, active),
+  );
 
   overlay.append(formPanel, cardPanel, drawer);
   return overlay;
@@ -254,12 +257,7 @@ export function bannerKindForText(text: string): BannerKind {
 }
 
 /** Bottom dynamic context bar with a per-context button legend. */
-export type ControlContext =
-  | 'HUDDLE'
-  | 'PRE_SNAP'
-  | 'PASSING'
-  | 'CARRIER'
-  | 'DEFENSE';
+export type ControlContext = 'HUDDLE' | 'PRE_SNAP' | 'PASSING' | 'CARRIER' | 'DEFENSE';
 
 export function buildControlsBar(context: ControlContext): HTMLElement {
   const bar = el('div', 'gsn-control-bar');

@@ -38,23 +38,17 @@ describe('AICoach situational playcalling', () => {
   it('passes on 3rd & long and prefers a deep route when trailing', () => {
     const base = decideCoachPlay(sit({ down: 3, yardsToGo: 12 }));
     expect(getKind(base.offensePlayId)).toBe('PASS');
-    const trailing = decideCoachPlay(
-      sit({ down: 3, yardsToGo: 12, score: { home: 14, away: 0 } }),
-    );
+    const trailing = decideCoachPlay(sit({ down: 3, yardsToGo: 12, score: { home: 14, away: 0 } }));
     expect(trailing.offensePlayId).toBe('DEEP_CROSS');
   });
 
   it('counters a perceived pass with a cover play on defense', () => {
-    const d = decideCoachPlay(
-      sit({ aiIsOffense: false, down: 2, yardsToGo: 6, los: 40 }),
-    );
+    const d = decideCoachPlay(sit({ aiIsOffense: false, down: 2, yardsToGo: 6, los: 40 }));
     expect(d.defensePlayId).toBe('COFFIN_COVER_3');
   });
 
   it('counters a short-yardage run with a run-stuff front', () => {
-    const d = decideCoachPlay(
-      sit({ aiIsOffense: false, down: 2, yardsToGo: 2, los: 40 }),
-    );
+    const d = decideCoachPlay(sit({ aiIsOffense: false, down: 2, yardsToGo: 2, los: 40 }));
     expect(['GOAL_LINE_STUFF', 'RUN_STUFF_STAKE']).toContain(d.defensePlayId);
   });
 
@@ -65,9 +59,7 @@ describe('AICoach situational playcalling', () => {
 
 describe('AICoach nasty & ref reactions', () => {
   it('arms Kill Ref when the opponent bribes the Necro-Ref against it', () => {
-    const d = decideCoachPlay(
-      sit({ refBribedAgainst: true, aiIsOffense: false }),
-    );
+    const d = decideCoachPlay(sit({ refBribedAgainst: true, aiIsOffense: false }));
     expect(d.nasty).toBe('KILL_REF');
   });
 
@@ -95,7 +87,14 @@ function getKind(id: string): string {
   // importing the full playbook type; the decision already validated ids are real.
   if (/^(PUNT)$/.test(id)) return 'PUNT';
   if (/^(FIELD_GOAL)$/.test(id)) return 'FIELD_GOAL';
-  const runs = ['INSIDE_GORE_RUN', 'COFFIN_SWEEP', 'OPTION_PITCH', 'DRAW_OF_DOOM', 'SPECTER_SNEAK', 'TOMBSTONE_PLUNGE'];
+  const runs = [
+    'INSIDE_GORE_RUN',
+    'COFFIN_SWEEP',
+    'OPTION_PITCH',
+    'DRAW_OF_DOOM',
+    'SPECTER_SNEAK',
+    'TOMBSTONE_PLUNGE',
+  ];
   const passes = ['QUICK_SLANTS', 'POST_CORNER', 'DEEP_CROSS', 'SCREEN_TRAP'];
   if (runs.includes(id)) return 'RUN';
   if (passes.includes(id)) return 'PASS';

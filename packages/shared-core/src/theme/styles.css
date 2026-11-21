@@ -42,6 +42,13 @@
   box-sizing: border-box;
 }
 
+/* The `hidden` attribute must win over any component `display` rule (e.g. the
+   huddle overlay's `display: flex`), otherwise `host.hidden = true` in the
+   scene leaves the element visible. */
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   margin: 0;
