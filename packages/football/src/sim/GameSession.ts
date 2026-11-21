@@ -164,6 +164,10 @@ export interface SnapOptions {
     fieldGoalGood?: boolean;
     puntYards?: number;
     refKilled?: boolean;
+    /** The QB scrambled on a pass play and ended the down with the ball (never
+        threw): commit it as a run with the QB as carrier instead of rolling a
+        fresh pass outcome that would erase the gain or change possession. */
+    qbRun?: boolean;
   };
 }
 
@@ -658,6 +662,19 @@ export class GameSession {
 
     // Pass play.
     const qb = offense.player('OFFENSE', 'QB');
+    // A QB scramble that ended the down with the ball still behind center is a
+    // run: the QB kept the ball (never threw), so record the actual gained yardage
+    // with the QB as the carrier instead of re-rolling a pass outcome that could
+    // credit an incompletion (erasing the gain) or an interception (turnover).
+    if (force.qbRun) {
+      return {
+        kind: 'RUN',
+        gain: force.yards ?? 0,
+        fumble: force.fumble ?? this.rng.chance(fumbleChance),
+        carrier: 'QB',
+        intercepted: false,
+      };
+    }
     const sackChance = clamp(
       0.04 + def.pressure * 0.2 + (has('QB_CRYPT_BLITZ') ? 0.25 : 0),
       0,

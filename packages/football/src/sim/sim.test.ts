@@ -224,6 +224,33 @@ describe('downs, clock & scoring', () => {
     expect(r.kind).toBe('INTERCEPTION');
     expect(g.possession).toBe('away');
   });
+  it('QB scramble past the LOS commits as a run, preserving gain and possession', () => {
+    // A QB who scrambles past the line of scrimmage and is tackled / steps out of
+    // bounds never threw the ball, so the down must be recorded as a run with the
+    // QB as carrier — not re-rolled into a pass outcome that would erase the gain
+    // (incompletion) or flip possession (interception).
+    const g = start();
+    setup(g, 'QUICK_SLANTS');
+    const before = g.los;
+    const r = g.snap({ force: { yards: 6, qbRun: true, tackleDamage: 1 } });
+    expect(r.kind).toBe('RUN');
+    expect(r.yards).toBe(6);
+    expect(g.los).toBe(before + 6);
+    expect(g.possession).toBe('home');
+    expect(g.down).toBe(2);
+    // The tackle applies to the QB as the ball carrier.
+    expect(r.damage.some((d) => d.slot === 'QB' && d.source === 'TACKLE')).toBe(true);
+  });
+  it('a positive-yard QB scramble out of bounds keeps the gain (no turnover)', () => {
+    const g = start();
+    setup(g, 'QUICK_SLANTS');
+    const r = g.snap({ force: { yards: 4, qbRun: true, outOfBounds: true } });
+    expect(r.kind).toBe('RUN');
+    expect(r.outOfBounds).toBe(true);
+    expect(r.yards).toBe(4);
+    expect(r.turnover).toBe(false);
+    expect(g.possession).toBe('home');
+  });
   it('clock: quarters, halftime, timeouts reset, game end', () => {
     const g = start(3, { quarterSeconds: 10 });
     expect(g.callTimeout('home')).toBe(true);

@@ -792,6 +792,7 @@ export class MatchScene extends Phaser.Scene {
         tackleDamage?: number;
         fumble?: boolean;
         sacked?: boolean;
+        qbRun?: boolean;
       };
       hazards?: HazardHit[];
     } = {
@@ -807,17 +808,25 @@ export class MatchScene extends Phaser.Scene {
     // QB is actually still behind (or on) the line of scrimmage is it a sack/erased
     // gain: a QB who scrambled *past* the LOS and is then tackled or steps out of
     // bounds keeps the positive gain (the original yardage, not a clamped zero).
+    //
+    // A QB who scrambles past the LOS never threw the ball (this path only runs when
+    // no pass is in flight), so it must be recorded as a *run* with the QB as the
+    // carrier — committing a plain yards override would still let `rawPlay()` roll a
+    // fresh pass outcome and turn the gain into an incompletion or a turnover.
     if (this.isPassPlay && r.outcome.kind === 'WHISTLE') {
       const behindLos = yards <= 0;
       if (r.outcome.reason === 'TACKLE' && behindLos) {
         snap.force.sacked = true;
         snap.force.yards = yards;
-      }
-      // A scrambled QB who steps out of bounds behind the LOS is an incomplete pass,
-      // not a new snap with random air yardage. Past the LOS the gain is preserved.
-      if (r.outcome.reason === 'OUT_OF_BOUNDS' && behindLos) {
+      } else if (r.outcome.reason === 'OUT_OF_BOUNDS' && behindLos) {
+        // A scrambled QB who steps out of bounds behind the LOS is an incomplete pass,
+        // not a new snap with random air yardage. Past the LOS the gain is preserved.
         snap.force.sacked = true;
         snap.force.yards = 0;
+      } else if (yards > 0) {
+        // Positive-yard QB scramble: keep the gain, QB as carrier, recorded as a run.
+        snap.force.qbRun = true;
+        snap.force.yards = yards;
       }
     }
 
