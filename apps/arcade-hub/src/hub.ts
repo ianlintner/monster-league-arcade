@@ -166,12 +166,20 @@ const audioStatus = el('span', 'gsn-audio-status', 'Ready');
 audioStatus.dataset.testid = 'audio-status';
 const audio = new AudioManager();
 audioBtn.addEventListener('click', () => {
-  void audio.unlock().then(() => {
-    audio.playSfx('bleep-a');
-    void audio.playVoice('welcome').then((kind) => {
+  audio
+    .unlock()
+    .then(() => {
+      audio.playSfx('bleep-a');
+      return audio.playVoice('welcome');
+    })
+    .then((kind) => {
       audioStatus.textContent = kind === 'clip' ? 'Clip played' : `Fallback: ${kind}`;
+    })
+    .catch(() => {
+      // Autoplay policy denial or a broken audio path must not throw an
+      // unhandled rejection on the click handler.
+      audioStatus.textContent = 'Audio unavailable';
     });
-  });
 });
 audioPanel.append(audioBtn, audioStatus);
 stage.after(audioPanel);

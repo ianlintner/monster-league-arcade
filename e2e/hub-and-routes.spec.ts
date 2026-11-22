@@ -1,13 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-
-function trackErrors(page: Page): string[] {
-  const errors: string[] = [];
-  page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
-  page.on('console', (m) => {
-    if (m.type() === 'error') errors.push(`console: ${m.text()}`);
-  });
-  return errors;
-}
+import { expect, test } from '@playwright/test';
+import { trackErrors } from './errors';
 
 for (const [path, title] of [
   ['/', 'Monster League Arcade'],
@@ -27,7 +19,7 @@ for (const [path, title] of [
       await expect(page.getByTestId('control-bar')).toBeVisible();
     }
     await page.waitForTimeout(300);
-    expect(errors.filter((e) => !/fonts\.(googleapis|gstatic)|ERR_/.test(e))).toEqual([]);
+    expect(errors).toEqual([]);
   });
 }
 

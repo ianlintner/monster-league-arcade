@@ -1,13 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
-
-function trackErrors(page: Page): string[] {
-  const errors: string[] = [];
-  page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
-  page.on('console', (m) => {
-    if (m.type() === 'error') errors.push(`console: ${m.text()}`);
-  });
-  return errors;
-}
+import { join } from 'node:path';
+import { screenshotDir } from './screenshot-path';
+import { trackErrors } from './errors';
 
 interface HazardSnapshot {
   id: string;
@@ -63,7 +57,7 @@ test('passing windows open, throw completes, no console errors', async ({ page }
   await page.keyboard.up('KeyC');
   await expect.poll(async () => (await mlf(page)).windowsOpen, { timeout: 5_000 }).toBe(true);
   await page.waitForTimeout(200);
-  await page.screenshot({ path: 'docs/screenshots/football-passing-windows.png' });
+  await page.screenshot({ path: join(screenshotDir, 'football-passing-windows.png') });
 
   // After a single C press, mode is still LIVE (a throw to C would commit a pass
   // and advance to BANNER). Confirm no throw fired from the opening press.
@@ -75,10 +69,10 @@ test('passing windows open, throw completes, no console errors', async ({ page }
   await page.waitForTimeout(220); // hold > 180 ms → bullet; lob under that
   await page.keyboard.up('KeyA');
   await expect.poll(async () => (await mlf(page)).mode, { timeout: 10_000 }).toBe('BANNER');
-  await page.screenshot({ path: 'docs/screenshots/football-pass.png' });
+  await page.screenshot({ path: join(screenshotDir, 'football-pass.png') });
 
   await page.waitForTimeout(300);
-  expect(errors.filter((e) => !/fonts\.(googleapis|gstatic)|ERR_/.test(e))).toEqual([]);
+  expect(errors).toEqual([]);
 });
 
 test('carrier walks into a grave → hazard hit and casualty render', async ({ page }) => {
@@ -105,13 +99,13 @@ test('carrier walks into a grave → hazard hit and casualty render', async ({ p
     .poll(async () => (await mlf(page)).mode, { timeout: 10_000 })
     .toMatch(/^(PICK|PRE_SNAP|BANNER)$/);
   await page.waitForTimeout(200);
-  await page.screenshot({ path: 'docs/screenshots/football-hazard-hit.png' });
+  await page.screenshot({ path: join(screenshotDir, 'football-hazard-hit.png') });
 
   const handle = await mlf(page);
   // At least one hazard hit was committed through SnapOptions.
   expect(handle.lastDamage + handle.lastCasualties).toBeGreaterThan(0);
-  await page.screenshot({ path: 'docs/screenshots/football-casualty.png' });
+  await page.screenshot({ path: join(screenshotDir, 'football-casualty.png') });
 
   await page.waitForTimeout(300);
-  expect(errors.filter((e) => !/fonts\.(googleapis|gstatic)|ERR_/.test(e))).toEqual([]);
+  expect(errors).toEqual([]);
 });

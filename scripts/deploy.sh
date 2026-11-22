@@ -40,11 +40,13 @@ if [[ "$ENVIRONMENT" == "production" ]]; then
     echo " refusing production deploy from branch '$branch' (main only)" >&2
     exit 1
   fi
-  if [[ -n "$(git status --porcelain origin/main..HEAD)" ]]; then
+  git fetch --quiet origin main
+  # Local main must be the same commit as origin/main (a no-op count when aligned,
+  # an ahead/behind count when it has diverged ahead of the remote).
+  if [[ "$(git rev-list --count origin/main..HEAD)" != "0" ]]; then
     echo " refusing production deploy: local main is not aligned with origin/main" >&2
     exit 1
   fi
-  git fetch --quiet origin main
   if [[ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]]; then
     echo " refusing production deploy: HEAD is not origin/main" >&2
     exit 1
@@ -81,7 +83,9 @@ if [[ "$host" != http* ]]; then host="https://$host"; fi
 
 echo "==> Deploying dist/ to $host ($ENVIRONMENT)"
 # --no-use-keychain prevents the token being persisted outside this process.
-SWA_CLI_DEPLOYMENT_TOKEN="$token" npx --yes @azure/static-web-apps-cli deploy \
+# The CLI is a pinned devDependency (package.json); the local binary is invoked
+# without `--yes` so the deployment token is never handed to an unpinned remote.
+SWA_CLI_DEPLOYMENT_TOKEN="$token" npx --no-install @azure/static-web-apps-cli deploy \
   --output-location ./dist \
   --swa-config-location ./dist \
   --env "$ENVIRONMENT" \
