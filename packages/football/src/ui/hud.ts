@@ -38,10 +38,15 @@ export function formatClock(seconds: number): string {
   return s >= 60 ? `${String(m).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}` : String(s);
 }
 
-/** "BALL ON OWN 25" field-position label. */
-export function losLabel(los: number, possession: 'home' | 'away'): string {
-  const fromGoal = possession === 'home' ? 100 - los : los;
-  return `BALL ON ${possession === 'home' ? 'OPP' : 'OWN'} ${fromGoal}`;
+/**
+ * "BALL ON OWN 25" field-position label, relative to the team with the ball
+ * (`los` is yards from the offense's own goal line). `possession` is kept for
+ * the callers' convenience; the text is identical for either team.
+ */
+export function losLabel(los: number, _possession: 'home' | 'away'): string {
+  if (los < 50) return `BALL ON OWN ${los}`;
+  if (los > 50) return `BALL ON OPP ${100 - los}`;
+  return 'BALL ON 50';
 }
 
 export function downDistanceLabel(down: number, yardsToGo: number): string {

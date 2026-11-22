@@ -56,6 +56,22 @@ describe('GSN 66.6 Scorebug', () => {
     expect(el.querySelector('.gsn-scorebug__down')?.textContent).toBe('3RD & 8');
   });
 
+  it('describes field position relative to the team with the ball', () => {
+    const cases: [number, 'home' | 'away', string][] = [
+      [25, 'home', 'BALL ON OWN 25'],
+      [25, 'away', 'BALL ON OWN 25'],
+      [62, 'home', 'BALL ON OPP 38'],
+      [62, 'away', 'BALL ON OPP 38'],
+      [1, 'home', 'BALL ON OWN 1'],
+      [99, 'away', 'BALL ON OPP 1'],
+      [50, 'home', 'BALL ON 50'],
+      [50, 'away', 'BALL ON 50'],
+    ];
+    for (const [los, possession, expected] of cases) {
+      expect(losLabel(los, possession), `losLabel(${los}, '${possession}')`).toBe(expected);
+    }
+  });
+
   it('activates the bribed-ref badge only when a bribe is in effect', () => {
     const idle = buildScorebug(state()).querySelector('[data-testid="bribe-badge"]')!;
     expect(idle.getAttribute('data-active')).toBe('false');
