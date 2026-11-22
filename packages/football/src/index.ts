@@ -7,6 +7,9 @@ export { CANVAS_WIDTH, CANVAS_HEIGHT, MatchScene };
 
 export * from './sim/index';
 export * from './field/index';
+export * from './ai/AICoach';
+export * from './modes/MonsterBowl';
+export * from './ui/hud';
 
 export function bootFootball(parent: HTMLElement, opts?: { production?: boolean }): Phaser.Game {
   MatchScene.isProduction = opts?.production ?? false;
