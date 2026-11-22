@@ -1,15 +1,65 @@
 import { initChrome } from './chrome';
 import { FACTIONS, getArena, InputManager, type Faction } from '@monster-league/shared-core';
 import { el } from '@monster-league/shared-core/ui';
+import { AudioManager } from '@monster-league/shared-core/audio';
+
+// Shared normalized-art registry: all routes point at the same /assets tree.
+const ASSET_ROOT = '/assets';
+const ASSET_SLUGS: Record<string, string> = {
+  reapers: 'boneyard_reapers',
+  deadskins: 'rotting_deadskins',
+  nightstalkers: 'transylvania_nightstalkers',
+  ghouls: 'salem_bayou_ghouls',
+};
+const FACTION_ART: Record<string, { coach: string; crest: string; sheet: string }> =
+  Object.fromEntries(
+    Object.entries(ASSET_SLUGS).map(([id, slug]) => [
+      id,
+      {
+        coach: `${ASSET_ROOT}/portraits/coach_${slug}.png`,
+        crest: `${ASSET_ROOT}/sprites/crest_${slug}.png`,
+        sheet: `${ASSET_ROOT}/sprites/${slug}.png`,
+      },
+    ]),
+  );
+const ARENA_ART: Record<string, string> = {
+  cursed_graveyard: `${ASSET_ROOT}/arenas/cursed_graveyard_turf.png`,
+  brimstone_hellfire_pit: `${ASSET_ROOT}/arenas/brimstone_hellfire_pit_turf.png`,
+  ectoplasm_swamp: `${ASSET_ROOT}/arenas/ectoplasm_swamp_turf.png`,
+};
+const OFFICIAL_ART = {
+  necroRef: `${ASSET_ROOT}/portraits/necro_ref.png`,
+  announcer: `${ASSET_ROOT}/portraits/crypt_announcer.png`,
+};
 
 initChrome();
 
 const roster = document.getElementById('roster');
 const detail = document.getElementById('faction-detail');
 
+function imgCard(src: string, label: string, testid?: string): HTMLElement {
+  const card = el('figure', 'gsn-art-card');
+  const img = el('img', 'gsn-art-card__img');
+  img.src = src;
+  img.alt = label;
+  if (testid) img.dataset.testid = testid;
+  card.append(img, el('figcaption', 'gsn-art-card__label', label));
+  return card;
+}
+
 function showFaction(f: Faction): void {
   if (!detail) return;
   detail.replaceChildren();
+  const art = FACTION_ART[f.id];
+  if (art) {
+    const strip = el('div', 'gsn-art-strip');
+    strip.append(
+      imgCard(art.coach, `${f.name} coach portrait`, 'faction-coach-portrait'),
+      imgCard(art.crest, `${f.name} crest`, 'faction-crest'),
+      imgCard(art.sheet, `${f.name} away kit`, 'faction-spritesheet'),
+    );
+    detail.append(strip);
+  }
   const dl = el('dl');
   const row = (k: string, v: string): void => {
     const r = el('div', 'gsn-kv');
@@ -89,3 +139,39 @@ function tick(): void {
   requestAnimationFrame(tick);
 }
 tick();
+
+// Shared-asset broadcast stage: the same normalized arenas and officials feed
+// football and hockey. Displayed here so the hub doubles as the visual QA board.
+const stage = el('section', 'gsn-panel gsn-asset-stage');
+stage.append(el('h2', 'gsn-panel__title', 'Broadcast Asset Board'));
+const arenas = el('div', 'gsn-art-strip');
+for (const [id, src] of Object.entries(ARENA_ART)) {
+  arenas.append(imgCard(src, id.replaceAll('_', ' '), `arena-${id}`));
+}
+arenas.append(
+  imgCard(OFFICIAL_ART.necroRef, 'Necro-Ref', 'official-necro-ref'),
+  imgCard(OFFICIAL_ART.announcer, 'Crypt Announcer', 'official-announcer'),
+);
+stage.append(arenas);
+document.querySelector('.gsn-chrome')?.append(stage);
+
+// Crypt Announcer / FM synth preview. Audio starts on user gesture, as required
+// by browser autoplay policy; the same AudioManager is shared with both games.
+const audioPanel = el('section', 'gsn-panel gsn-audio-preview');
+audioPanel.append(el('h2', 'gsn-panel__title', 'Broadcast Audio Test'));
+const audioBtn = el('button', 'gsn-btn', 'Test Crypt Announcer');
+audioBtn.type = 'button';
+audioBtn.dataset.testid = 'audio-test';
+const audioStatus = el('span', 'gsn-audio-status', 'Ready');
+audioStatus.dataset.testid = 'audio-status';
+const audio = new AudioManager();
+audioBtn.addEventListener('click', () => {
+  void audio.unlock().then(() => {
+    audio.playSfx('bleep-a');
+    void audio.playVoice('welcome').then((kind) => {
+      audioStatus.textContent = kind === 'clip' ? 'Clip played' : `Fallback: ${kind}`;
+    });
+  });
+});
+audioPanel.append(audioBtn, audioStatus);
+stage.after(audioPanel);
