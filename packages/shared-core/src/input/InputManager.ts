@@ -10,6 +10,12 @@ export interface InputSnapshot {
   x: number;
   y: number;
   buttons: Record<ArcadeButton, boolean>;
+  /**
+   * Edge-buffered presses: true for a button whose keydown arrived since the last
+   * `poll()`, even if it was released again before this poll (a fast tap between
+   * two frames is still delivered exactly once). Consumed by the next poll.
+   */
+  pressed: Record<ArcadeButton, boolean>;
 }
 
 export interface KeyMap {
@@ -53,7 +59,12 @@ const STICK_DEADZONE = 0.25;
 const BUTTONS: ArcadeButton[] = ['A', 'B', 'C', 'START'];
 
 export function emptySnapshot(): InputSnapshot {
-  return { x: 0, y: 0, buttons: { A: false, B: false, C: false, START: false } };
+  return {
+    x: 0,
+    y: 0,
+    buttons: { A: false, B: false, C: false, START: false },
+    pressed: { A: false, B: false, C: false, START: false },
+  };
 }
 
 /** Normalise a raw vector: apply deadzone and clamp magnitude to 1. */
@@ -88,9 +99,21 @@ export class InputManager {
   private keys = new Set<string>();
   private touch: Record<PlayerIndex, Set<string>> = { 0: new Set(), 1: new Set() };
   private target: Window | null = null;
+  /**
+   * Edge latches: a keydown (or touch/gamepad press) sets the latch; the next
+   * `poll()` reads it into `snapshot.pressed` and clears it. This is what makes a
+   * fast tap between two frames still register exactly once.
+   */
+  private pressedKeys = new Set<string>();
+  private pressedTouch: Record<PlayerIndex, Set<string>> = { 0: new Set(), 1: new Set() };
+  private prevPadButtons: Record<PlayerIndex, Set<ArcadeButton>> = {
+    0: new Set(),
+    1: new Set(),
+  };
 
   private onKeyDown = (e: KeyboardEvent): void => {
     this.keys.add(e.code);
+    this.pressedKeys.add(e.code);
     if (isInteractiveOrEditableTarget(e.target)) return;
     if (ALL_MAPPED_CODES.has(e.code)) e.preventDefault();
   };
@@ -120,14 +143,22 @@ export class InputManager {
 
   /** Drive from on-screen touch controls: names are 'up','down','left','right','A','B','C','START'. */
   setTouch(player: PlayerIndex, control: string, pressed: boolean): void {
-    if (pressed) this.touch[player].add(control);
-    else this.touch[player].delete(control);
+    if (pressed) {
+      this.touch[player].add(control);
+      this.pressedTouch[player].add(control);
+    } else {
+      this.touch[player].delete(control);
+    }
   }
 
   /** Inject a key state directly (tests / synthetic input). */
   setKey(code: string, pressed: boolean): void {
-    if (pressed) this.keys.add(code);
-    else this.keys.delete(code);
+    if (pressed) {
+      this.keys.add(code);
+      this.pressedKeys.add(code);
+    } else {
+      this.keys.delete(code);
+    }
   }
 
   private held(player: PlayerIndex, control: keyof KeyMap): boolean {
@@ -154,6 +185,20 @@ export class InputManager {
     let { x, y } = dir;
     for (const b of BUTTONS) snap.buttons[b] = this.held(player, b);
 
+    // Edge-buffered presses: a button is "pressed" this poll if its key/touch
+    // latch fired since the last poll, or its gamepad button transitioned
+    // false→true since the last poll. Consume the latches now so each press is
+    // delivered exactly once.
+    for (const b of BUTTONS) {
+      const keyPressed = KEY_MAPS[player][b].some((c) => this.pressedKeys.has(c));
+      const touchPressed = this.pressedTouch[player].has(b);
+      snap.pressed[b] = keyPressed || touchPressed;
+    }
+    for (const b of BUTTONS) {
+      for (const c of KEY_MAPS[player][b]) this.pressedKeys.delete(c);
+      this.pressedTouch[player].delete(b);
+    }
+
     const pad = this.gamepadFor(player);
     if (pad) {
       const dx = (pad.buttons[15]?.pressed ? 1 : 0) - (pad.buttons[14]?.pressed ? 1 : 0);
@@ -165,9 +210,18 @@ export class InputManager {
         x = padDir.x;
         y = padDir.y;
       }
+      const now = new Set<ArcadeButton>();
       for (const b of BUTTONS) {
-        if (pad.buttons[GAMEPAD_BUTTONS[b]]?.pressed) snap.buttons[b] = true;
+        if (pad.buttons[GAMEPAD_BUTTONS[b]]?.pressed) {
+          snap.buttons[b] = true;
+          now.add(b);
+        }
       }
+      // Gamepad edge: false→true since the last poll is a fresh press.
+      for (const b of BUTTONS) {
+        if (now.has(b) && !this.prevPadButtons[player].has(b)) snap.pressed[b] = true;
+      }
+      this.prevPadButtons[player] = now;
     }
     snap.x = x;
     snap.y = y;

@@ -86,4 +86,45 @@ describe('InputManager', () => {
     expect(im.poll(1).x).toBe(1);
     Object.defineProperty(navigator, 'getGamepads', { configurable: true, value: undefined });
   });
+
+  it('delivers an edge press exactly once (a tap between two polls)', () => {
+    const im = new InputManager();
+    // Key down then up before the first poll — a fast 30ms tap.
+    im.setKey('KeyJ', true);
+    im.setKey('KeyJ', false);
+    expect(im.poll(0).pressed.A).toBe(true);
+    // The latch is consumed: the next poll reports no press.
+    expect(im.poll(0).pressed.A).toBe(false);
+    // A held key stays held, but only edges once.
+    im.setKey('KeyL', true);
+    expect(im.poll(0).pressed.C).toBe(true);
+    expect(im.poll(0).buttons.C).toBe(true);
+    expect(im.poll(0).pressed.C).toBe(false);
+  });
+
+  it('delivers a DOM keydown press edge per poll', () => {
+    const im = new InputManager();
+    im.attach(window);
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyK' }));
+    expect(im.poll(0).pressed.B).toBe(true);
+    expect(im.poll(0).pressed.B).toBe(false);
+    im.detach();
+  });
+
+  it('detects a gamepad button false→true transition as a press edge', () => {
+    const btn = (pressed: boolean) => ({ pressed, touched: false, value: 0 });
+    const buttons = new Array(16).fill(btn(false));
+    buttons[0] = btn(true);
+    const pad = { buttons, axes: [0, 0] } as unknown as Gamepad;
+    Object.defineProperty(navigator, 'getGamepads', {
+      configurable: true,
+      value: () => [pad],
+    });
+    const im = new InputManager();
+    expect(im.poll(0).pressed.A).toBe(true);
+    expect(im.poll(0).buttons.A).toBe(true);
+    // Still held, but no longer a fresh edge.
+    expect(im.poll(0).pressed.A).toBe(false);
+    Object.defineProperty(navigator, 'getGamepads', { configurable: true, value: undefined });
+  });
 });
