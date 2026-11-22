@@ -398,7 +398,14 @@ export class MatchScene extends Phaser.Scene {
     // is advanced by PLAY_SECONDS/STOPPED_PLAY_SECONDS inside `finishPlay`.
     const phase = this.session.phase;
     if (phase === 'HUDDLE_PLAYCALL' || phase === 'PRE_SNAP') {
-      this.session.tickPlayClock(dt);
+      const penalty = this.session.tickPlayClock(dt);
+      // A play clock that expires in the huddle costs 5 yards (Delay of Game) and
+      // auto-picks the currently-selected play so the drive can't stall on an idle
+      // huddle. The penalty is applied inside `tickPlayClock`; here we just force
+      // the pick so the down proceeds.
+      if (penalty?.kind === 'DELAY_OF_GAME' && this.mode === 'PICK') {
+        this.confirmPlay(this.selectedPlayIndex);
+      }
     }
 
     switch (this.mode) {
