@@ -391,6 +391,16 @@ export class MatchScene extends Phaser.Scene {
     this.renderDt = dt;
     this.sampleInput(dt);
 
+    // Advance the play clock (and, while running, the between-play game clock).
+    // `GameSession.tickPlayClock` drives both: the 25s play clock counts down in
+    // the huddle/pre-snap phases and triggers a Delay of Game at zero, while the
+    // game clock runs down here on a running clock between plays. The game clock
+    // is advanced by PLAY_SECONDS/STOPPED_PLAY_SECONDS inside `finishPlay`.
+    const phase = this.session.phase;
+    if (phase === 'HUDDLE_PLAYCALL' || phase === 'PRE_SNAP') {
+      this.session.tickPlayClock(dt);
+    }
+
     switch (this.mode) {
       case 'PICK':
         this.updatePick();
