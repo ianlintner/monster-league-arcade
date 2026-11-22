@@ -14,13 +14,13 @@ Inspired by the 1993 Sega Genesis classic _Mutant League Football_ (and _Mutant 
 
 All game input routes through the shared `InputManager` (Genesis 3-button arcade model: **A / B / C / Start**). Keyboard, gamepad, and touch all drive the same edge-buffered input snapshot.
 
-| Action | Keyboard (P1) | Keyboard (P2) | Gamepad |
-| --- | --- | --- | --- |
-| Move | `W` `A` `S` `D` | Arrow keys | D-pad / left stick |
-| **A** | `J` or `Space` | `Z` | South (A) |
-| **B** | `K` | `X` | East (B) |
-| **C** | `L` | `C` | West (X) |
-| **Start** | `P` | `Enter` | Start |
+| Action    | Keyboard (P1)   | Keyboard (P2) | Gamepad            |
+| --------- | --------------- | ------------- | ------------------ |
+| Move      | `W` `A` `S` `D` | Arrow keys    | D-pad / left stick |
+| **A**     | `J` or `Space`  | `Z`           | South (A)          |
+| **B**     | `K`             | `X`           | East (B)           |
+| **C**     | `L`             | `C`           | West (X)           |
+| **Start** | `P`             | `Enter`       | Start              |
 
 - **Huddle**: `A`/`B`/`C` call a play; `C` opens the Nasty Drawer.
 - **Pre-snap**: `A` audible, `B` shift, `C` hike.

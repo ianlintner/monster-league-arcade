@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { join } from 'node:path';
 import { screenshotDir } from './screenshot-path';
 import { trackErrors } from './errors';
+import { P1, tap } from './keys';
 
 interface MlfHandle {
   phase: string;
@@ -12,8 +13,6 @@ interface MlfHandle {
   carrierId: string | null;
   bannerKind: string;
   aiDecision: { offensePlayId: string; defensePlayId: string; nasty: string | null } | null;
-  pick: (i: number) => void;
-  snap: () => void;
 }
 
 function mlf(page: Page): Promise<MlfHandle> {
@@ -41,7 +40,7 @@ test('the enriched scorebug renders crests, casualty skulls and a bribed-ref bad
   // Capture the scorebug in a huddle-free frame: leave PICK first so the overlay
   // is gone and the top bar reads in isolation (otherwise this screenshot is
   // pixel-identical to football-huddle.png).
-  await page.evaluate(() => (window as unknown as { __mlf?: MlfHandle }).__mlf!.pick(0));
+  await tap(page, P1.A);
   await expect(page.locator('[data-testid="huddle"]')).toBeHidden();
   await page.screenshot({ path: join(screenshotDir, 'football-scorebug.png') });
 
@@ -70,7 +69,7 @@ test('the huddle overlay renders three play cards and the nasty drawer while PIC
   await page.screenshot({ path: join(screenshotDir, 'football-huddle.png') });
 
   // Leaving PICK (confirm a play) hides the huddle overlay.
-  await page.evaluate(() => (window as unknown as { __mlf?: MlfHandle }).__mlf!.pick(0));
+  await tap(page, P1.A);
   await expect(page.locator('[data-testid="huddle"]')).toBeHidden();
 });
 

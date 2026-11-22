@@ -134,7 +134,7 @@ describe('InputManager', () => {
     // the InputManager delivers those as distinct, ordered press edges so a
     // gamepad-only player can drive the whole pick → snap flow.
     const btn = (pressed: boolean) => ({ pressed, touched: false, value: 0 });
-    let buttons = new Array(16).fill(btn(false));
+    const buttons = new Array(16).fill(btn(false));
     const pad = { buttons, axes: [0, 0] } as unknown as Gamepad;
     Object.defineProperty(navigator, 'getGamepads', {
       configurable: true,
