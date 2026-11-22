@@ -127,4 +127,35 @@ describe('InputManager', () => {
     expect(im.poll(0).pressed.A).toBe(false);
     Object.defineProperty(navigator, 'getGamepads', { configurable: true, value: undefined });
   });
+
+  it('drives pick → snap with a mocked Gamepad (A then C press edges)', () => {
+    // A mocked Gamepad whose face buttons we flip between polls. The scene maps
+    // A (button 0) to the play pick and C (button 2) to the snap; here we assert
+    // the InputManager delivers those as distinct, ordered press edges so a
+    // gamepad-only player can drive the whole pick → snap flow.
+    const btn = (pressed: boolean) => ({ pressed, touched: false, value: 0 });
+    let buttons = new Array(16).fill(btn(false));
+    const pad = { buttons, axes: [0, 0] } as unknown as Gamepad;
+    Object.defineProperty(navigator, 'getGamepads', {
+      configurable: true,
+      value: () => [pad],
+    });
+    const im = new InputManager();
+
+    // Pick: press A (button 0), poll, release.
+    buttons[0] = btn(true);
+    const pick = im.poll(0);
+    expect(pick.pressed.A).toBe(true);
+    expect(pick.pressed.C).toBe(false);
+    buttons[0] = btn(false);
+    im.poll(0); // consume the release
+
+    // Snap: press C (button 2), poll.
+    buttons[2] = btn(true);
+    const snap = im.poll(0);
+    expect(snap.pressed.C).toBe(true);
+    expect(snap.pressed.A).toBe(false);
+
+    Object.defineProperty(navigator, 'getGamepads', { configurable: true, value: undefined });
+  });
 });
