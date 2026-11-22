@@ -10,6 +10,24 @@ Inspired by the 1993 Sega Genesis classic _Mutant League Football_ (and _Mutant 
 - **`/football/` — Halloween Monster League Football**: 7-on-7 satirical monster gridiron featuring Nasty Audibles (Pumpkin Bomb Pass, Dynamite Pitch, Bat-Wing Boost, Ghoul Gas, QB Crypt Blitz), Field Hazards (landmines, open graves, lava pits, ectoplasm sludge), Bribe Ref, Kill Ref, and Forfeit-by-Carnage rules.
 - **`/hockey/` — Monster League Hockey (Preview)**: Shared-engine rink preview for the upcoming 5-on-5 monster hockey clash.
 
+## Controls
+
+All game input routes through the shared `InputManager` (Genesis 3-button arcade model: **A / B / C / Start**). Keyboard, gamepad, and touch all drive the same edge-buffered input snapshot.
+
+| Action | Keyboard (P1) | Keyboard (P2) | Gamepad |
+| --- | --- | --- | --- |
+| Move | `W` `A` `S` `D` | Arrow keys | D-pad / left stick |
+| **A** | `J` or `Space` | `Z` | South (A) |
+| **B** | `K` | `X` | East (B) |
+| **C** | `L` | `C` | West (X) |
+| **Start** | `P` | `Enter` | Start |
+
+- **Huddle**: `A`/`B`/`C` call a play; `C` opens the Nasty Drawer.
+- **Pre-snap**: `A` audible, `B` shift, `C` hike.
+- **Passing**: `C` opens receiver windows, then `A`/`B`/`C` throw (tap lob, hold bullet).
+- **Ball carrier**: `A` dive, `B` spin/stiff-arm, `C` turbo.
+- **Defense**: `A` big hit, `B` switch defender, `C` strip/burst.
+
 ## Status
 
 - **Phase**: MVP in active Kanban development (`monster-league-arcade` board).

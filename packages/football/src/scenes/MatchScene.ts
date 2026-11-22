@@ -1917,18 +1917,18 @@ export class MatchScene extends Phaser.Scene {
     switch (this.mode) {
       case 'PICK': {
         const cat = catalogForDown(this.session.down);
-        prompt = `Call the play — [A] ${cat[0]!.label} · [B] ${cat[1]!.label} · [C] ${cat[2]!.label}`;
+        prompt = `Call the play — [A=J] ${cat[0]!.label} · [B=K] ${cat[1]!.label} · [C=L] ${cat[2]!.label}`;
         break;
       }
       case 'PRE_SNAP':
-        prompt = `Pre-Snap: [C] Snaps the ball · ${down}`;
+        prompt = `Pre-Snap: [C=L] Snaps the ball · ${down}`;
         break;
       case 'LIVE':
         prompt = this.isKickPlay
           ? this.kickLocked === null
-            ? `Hold [C] to sweep the kick meter, release to lock · ${down}`
+            ? `Hold [C=L] to sweep the kick meter, release to lock · ${down}`
             : `Kick locked · ${down}`
-          : `Live: arrows run · [A] Dive · [C] Turbo · [B] Switch defender`;
+          : `Live: WASD run · [A=J] Dive · [C=L] Turbo · [B=K] Switch defender`;
         break;
       case 'BANNER':
         prompt = this.bannerText;

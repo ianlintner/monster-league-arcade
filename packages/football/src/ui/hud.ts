@@ -304,17 +304,20 @@ export function buildControlsBar(context: ControlContext): HTMLElement {
 }
 
 function legendFor(context: ControlContext): string {
+  // Keyboard labels mirror the shared-core InputManager P1 map (A=J/Space, B=K,
+  // C=L, Start=P, movement WASD); gamepad uses the standard South/East/West face
+  // buttons for A/B/C. Show the real keys so the prompt matches what actually works.
   switch (context) {
     case 'HUDDLE':
-      return 'Huddle: [A]/[B]/[C] Call Play · [C] Nasty Drawer';
+      return 'Huddle: [A=J]/[B=K]/[C=L] Call Play · [C=L] Nasty Drawer';
     case 'PRE_SNAP':
-      return 'Pre-Snap: [A] Audible · [B] Shift · [C] Hike';
+      return 'Pre-Snap: [A=J] Audible · [B=K] Shift · [C=L] Hike';
     case 'PASSING':
-      return 'Passing: [A]/[B]/[C] Throw · arrows lead receiver';
+      return 'Passing: [A=J]/[B=K]/[C=L] Throw · WASD lead receiver';
     case 'CARRIER':
-      return 'Ball Carrier: arrows run · [A] Dive · [C] Turbo';
+      return 'Ball Carrier: WASD run · [A=J] Dive · [C=L] Turbo';
     case 'DEFENSE':
-      return 'Defense: arrows pursue · [B] Switch defender';
+      return 'Defense: WASD pursue · [B=K] Switch defender';
   }
 }
 
