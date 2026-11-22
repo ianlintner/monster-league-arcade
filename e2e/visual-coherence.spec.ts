@@ -1,10 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const OUT = join(dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'screenshots');
-mkdirSync(OUT, { recursive: true });
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { screenshotDir } from './screenshot-path';
+import { trackErrors } from './errors';
 
 const mlf = (page: Page): Promise<{ mode: string; bannerKind: string }> =>
   page.evaluate(() => {
@@ -30,13 +28,8 @@ const call = (page: Page, fn: 'pick' | 'snap' | 'forceCarrierTo', ...args: numbe
   );
 
 function trackAssets(page: Page): { errors: string[]; loaded: string[] } {
-  const errors: string[] = [];
+  const errors = trackErrors(page);
   const loaded: string[] = [];
-  page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
-  page.on('console', (m) => {
-    if (m.type() === 'error' && !/fonts\.(googleapis|gstatic)|ERR_/.test(m.text()))
-      errors.push(`console: ${m.text()}`);
-  });
   page.on('response', (r) => {
     const u = new URL(r.url());
     if (u.pathname.startsWith('/assets/')) {
@@ -48,7 +41,7 @@ function trackAssets(page: Page): { errors: string[]; loaded: string[] } {
 }
 
 const capture = async (page: Page, name: string): Promise<void> => {
-  writeFileSync(join(OUT, name), await page.screenshot());
+  writeFileSync(join(screenshotDir, name), await page.screenshot());
 };
 
 test('hub: cabinet, roster inspector and shared art/audio board load cleanly', async ({ page }) => {

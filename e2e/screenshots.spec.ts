@@ -1,13 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { screenshotDir } from './screenshot-path';
 
 // Captures the art-uplift deliverable as real, reproducible screenshots under
 // docs/screenshots/. The gallery page renders the regenerated assets at 4x
 // nearest-neighbour from the served bundle; the football route shows the field.
-const OUT = join(dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'screenshots');
-mkdirSync(OUT, { recursive: true });
 
 declare global {
   interface Window {
@@ -43,7 +41,7 @@ test('captures the asset gallery screenshot', async ({ page }) => {
     return imgs.every((i) => i.complete && i.naturalWidth > 0);
   });
   const buf = await page.screenshot({ fullPage: true });
-  writeFileSync(join(OUT, 'gallery.png'), buf);
+  writeFileSync(join(screenshotDir, 'gallery.png'), buf);
 });
 
 /** Open the football route and wait until the game scene has booted. */
@@ -74,7 +72,7 @@ test('captures the pre-snap formation screenshot', async ({ page }) => {
   // teams in home/away colours, ball at the line of scrimmage).
   await page.evaluate(() => window.__mlf!.pick(0));
   await page.waitForTimeout(300);
-  writeFileSync(join(OUT, 'football-presnap.png'), await page.screenshot());
+  writeFileSync(join(screenshotDir, 'football-presnap.png'), await page.screenshot());
 });
 
 test('captures the mid-run screenshot', async ({ page }) => {
@@ -84,7 +82,7 @@ test('captures the mid-run screenshot', async ({ page }) => {
     window.__mlf!.snap();
   });
   await page.waitForTimeout(700);
-  writeFileSync(join(OUT, 'football-midrun.png'), await page.screenshot());
+  writeFileSync(join(screenshotDir, 'football-midrun.png'), await page.screenshot());
 });
 
 test('captures the pass-in-flight screenshot', async ({ page }) => {
@@ -100,7 +98,7 @@ test('captures the pass-in-flight screenshot', async ({ page }) => {
   // Distinct filename: `football-pass-hazard.spec.ts` writes `football-pass.png`
   // *after* the banner, so a shared path would let that suite overwrite this
   // genuinely in-flight capture (or vice-versa).
-  writeFileSync(join(OUT, 'football-pass-inflight.png'), await page.screenshot());
+  writeFileSync(join(screenshotDir, 'football-pass-inflight.png'), await page.screenshot());
 });
 
 test('captures the tackle screenshot', async ({ page }) => {
@@ -111,7 +109,7 @@ test('captures the tackle screenshot', async ({ page }) => {
   });
   // Let the run carry into contact — the knockdown/dive states show here.
   await page.waitForTimeout(1200);
-  writeFileSync(join(OUT, 'football-tackle.png'), await page.screenshot());
+  writeFileSync(join(screenshotDir, 'football-tackle.png'), await page.screenshot());
 });
 
 test('captures the touchdown screenshot', async ({ page }) => {
@@ -123,5 +121,5 @@ test('captures the touchdown screenshot', async ({ page }) => {
     window.__mlf!.forceCarrierTo(112, 26);
   });
   await page.waitForTimeout(1200);
-  writeFileSync(join(OUT, 'football-touchdown.png'), await page.screenshot());
+  writeFileSync(join(screenshotDir, 'football-touchdown.png'), await page.screenshot());
 });

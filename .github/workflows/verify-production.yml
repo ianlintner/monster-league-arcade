@@ -1,0 +1,25 @@
+name: verify-production
+
+on:
+  schedule:
+    # Daily at 07:30 UTC — cheap read-only verification of the live production
+    # deployment (routes, security headers and asset sha256 parity against a
+    # freshly built dist/). No repository secrets are required.
+    - cron: '30 7 * * *'
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Verify production deployment
+        env:
+          PROD_URL: https://gray-sky-061388210.6.azurestaticapps.net
+        run: node scripts/verify-deployment.mjs "$PROD_URL"

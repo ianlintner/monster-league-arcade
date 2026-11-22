@@ -1,13 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
-
-function trackErrors(page: Page): string[] {
-  const errors: string[] = [];
-  page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
-  page.on('console', (m) => {
-    if (m.type() === 'error') errors.push(`console: ${m.text()}`);
-  });
-  return errors;
-}
+import { join } from 'node:path';
+import { screenshotDir } from './screenshot-path';
+import { trackErrors } from './errors';
 
 interface MlfHandle {
   phase: string;
@@ -36,9 +30,9 @@ test('football boots into the play-call huddle with no console errors', async ({
   expect(handle.mode).toBe('PICK');
 
   await page.waitForTimeout(300);
-  expect(errors.filter((e) => !/fonts\.(googleapis|gstatic)|ERR_/.test(e))).toEqual([]);
+  expect(errors).toEqual([]);
 
-  await page.screenshot({ path: 'docs/screenshots/football-pick.png' });
+  await page.screenshot({ path: join(screenshotDir, 'football-pick.png') });
 });
 
 test('pick → snap → live down ends and the GameSession commits the result', async ({ page }) => {
@@ -52,7 +46,7 @@ test('pick → snap → live down ends and the GameSession commits the result', 
   expect((await mlf(page)).mode).toBe('PRE_SNAP');
   // Incidental capture for this gameplay test — not the deliverable art. The
   // deliverable `football-presnap.png` is written solely by screenshots.spec.ts.
-  await page.screenshot({ path: 'docs/screenshots/football-presnap-run.png' });
+  await page.screenshot({ path: join(screenshotDir, 'football-presnap-run.png') });
 
   // Snap into the live down.
   await page.evaluate(() => (window as unknown as { __mlf?: MlfHandle }).__mlf!.snap());
@@ -63,7 +57,7 @@ test('pick → snap → live down ends and the GameSession commits the result', 
   await page.waitForTimeout(1000);
   // Mid-run capture while the down is still live. Incidental to this gameplay
   // test; the deliverable `football-midrun.png` is written by screenshots.spec.ts.
-  await page.screenshot({ path: 'docs/screenshots/football-midrun-run.png' });
+  await page.screenshot({ path: join(screenshotDir, 'football-midrun-run.png') });
   await page.waitForTimeout(1500);
   await page.keyboard.up('ArrowRight');
 
@@ -80,6 +74,6 @@ test('pick → snap → live down ends and the GameSession commits the result', 
   expect(handle.down).toBe(2);
 
   await page.waitForTimeout(500);
-  expect(errors.filter((e) => !/fonts\.(googleapis|gstatic)|ERR_/.test(e))).toEqual([]);
-  await page.screenshot({ path: 'docs/screenshots/football-post-play.png' });
+  expect(errors).toEqual([]);
+  await page.screenshot({ path: join(screenshotDir, 'football-post-play.png') });
 });

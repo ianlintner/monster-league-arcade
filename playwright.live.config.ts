@@ -13,6 +13,11 @@ if (!/^https?:\/\//.test(baseURL)) {
   throw new Error('E2E_BASE_URL must be an http(s) URL of the deployed SWA');
 }
 
+// Live captures go to a gitignored directory so `e2e:live` does not dirty the
+// working tree (and therefore does not block the deploys it is verifying). The
+// screenshots specs read this env var directly.
+process.env.E2E_SCREENSHOT_DIR = 'docs/screenshots/live';
+
 export default defineConfig({
   testDir: './e2e',
   testIgnore: ['screenshots.spec.ts'],
