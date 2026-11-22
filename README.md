@@ -14,6 +14,17 @@ Inspired by the 1993 Sega Genesis classic _Mutant League Football_ (and _Mutant 
 
 - **Phase**: MVP in active Kanban development (`monster-league-arcade` board).
 - **Architecture & Art Bible**: See [`PLAN.md`](./PLAN.md) for the complete clean-room specification, unified _16-Bit Midnight Broadcast_ art/UI design system, and card roadmap.
+- **Module boundaries & file-size contract**: See [`ARCHITECTURE.md`](./ARCHITECTURE.md).
+- **Deployment**: `scripts/deploy.sh [review|production]` builds-checks, deploys the single `dist/` artifact to the `monster-league-arcade` Azure Static Web App, and verifies routes, security headers and asset sha256 parity. Requires Azure CLI access to the `nekoc` resource group; the deployment token stays in process memory.
+
+## Development
+
+```sh
+npm install
+npm run check                 # assets, typecheck, lint, format, 236+ unit tests, build
+npx playwright test           # local multi-page E2E + screenshots
+npm run e2e:live              # same E2E suite against the deployed SWA preview host
+```
 
 ## License
 

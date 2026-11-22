@@ -738,3 +738,46 @@ body.gsn-crt-on .gsn-crt-overlay {
     opacity: 1;
   }
 }
+
+/* ── Shared asset board (hub visual QA) ──────────────────────────────────── */
+
+.gsn-asset-stage,
+.gsn-audio-preview {
+  margin-top: 18px;
+}
+
+.gsn-art-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.gsn-art-card {
+  margin: 0;
+  padding: 6px;
+  background: var(--gsn-void-black);
+  border: 1px solid var(--gsn-iron-bezel);
+  box-shadow: 0 0 0 1px var(--gsn-void-black);
+}
+
+.gsn-art-card__img {
+  display: block;
+  height: 64px;
+  width: auto;
+  image-rendering: pixelated;
+  background: var(--gsn-void-black);
+  outline: 1px solid var(--gsn-void-black);
+}
+
+.gsn-art-card__label {
+  margin-top: 4px;
+  font-family: var(--gsn-font-pixel);
+  font-size: 9px;
+  color: var(--gsn-aged-parchment);
+}
+
+.gsn-audio-status {
+  margin-left: 12px;
+  font-family: var(--gsn-font-terminal);
+  color: var(--gsn-ecto-green);
+}

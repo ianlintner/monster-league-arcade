@@ -29,6 +29,8 @@
     "validate-audio": "node scripts/validate-audio.mjs",
     "generate:announcer": "node scripts/generate-announcer.mjs",
     "e2e": "playwright test",
+    "e2e:live": "playwright test --config playwright.live.config.ts",
+    "verify:deployment": "node scripts/verify-deployment.mjs",
     "e2e:report": "playwright show-report"
   },
   "devDependencies": {
