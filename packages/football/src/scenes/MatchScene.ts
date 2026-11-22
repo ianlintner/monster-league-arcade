@@ -437,7 +437,18 @@ export class MatchScene extends Phaser.Scene {
     // delivered exactly once (the root of the dropped-tap defect on the raw
     // `JustDown` path, which only saw a key if it was held across two frames).
     this.inputPollTimer -= dt;
-    if (this.inputPollTimer > 0) return;
+    if (this.inputPollTimer > 0) {
+      // We are between 60 Hz polls: keep the held-button level state for steering
+      // and hold-to-throw, but zero the *edge* latches so a press is delivered
+      // exactly once. Without this, the stale `pressed` flags would be re-read by
+      // every consumer on each render frame — a single C tap would both confirm a
+      // play (PICK) and snap it (PRE_SNAP) across two frames, skipping PRE_SNAP.
+      this.playerInput = {
+        ...this.playerInput,
+        pressed: { A: false, B: false, C: false, START: false },
+      };
+      return;
+    }
     this.inputPollTimer = 1 / 60;
 
     this.prevInput = this.playerInput;

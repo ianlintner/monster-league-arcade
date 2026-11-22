@@ -31,6 +31,11 @@ test('real-keyboard drive: four downs each tap, snap, steer, whistle', async ({ 
   await page.goto('/football/');
   await expect(page.locator('#game canvas')).toBeVisible();
 
+  // High-water mark of the down number across the drive: a real series of snaps
+  // must advance the down at least once (unless every run staged a first-down
+  // reset, which the fixed 900 ms steer does not guarantee against individually).
+  let maxDown = 1;
+
   for (let down = 1; down <= 4; down++) {
     // The play-call huddle must be showing before every down (defect #3: play-over
     // returned straight to PRE_SNAP with the previous play instead of a fresh call).
@@ -65,11 +70,12 @@ test('real-keyboard drive: four downs each tap, snap, steer, whistle', async ({ 
     await expect(label).toBeVisible();
     await expect(label).toHaveText(DOWN_TEXT);
 
-    // A real drive advances the down number each snap (unless a first down is
-    // gained); after four snaps the down must have advanced beyond 1.
-    const h = await mlf(page);
-    expect(h.down).toBeGreaterThan(1);
+    maxDown = Math.max(maxDown, (await mlf(page)).down);
   }
+
+  // A drive that actually snapped real plays must have advanced the down number
+  // beyond the opening 1st down at some point.
+  expect(maxDown).toBeGreaterThan(1);
 
   expect(errors).toEqual([]);
 });

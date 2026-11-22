@@ -45,11 +45,11 @@ test('passing windows open, throw completes, no console errors', async ({ page }
 
   // Call the pass play (index 2 = Quick Slants) with a real 30 ms C (L) tap.
   await tap(page, pickKey(2));
-  expect((await mlf(page)).mode).toBe('PRE_SNAP');
+  await expect.poll(async () => (await mlf(page)).mode, { timeout: 5_000 }).toBe('PRE_SNAP');
 
   await tap(page, P1.C);
-  expect((await mlf(page)).mode).toBe('LIVE');
-  expect((await mlf(page)).isPassPlay).toBe(true);
+  await expect.poll(async () => (await mlf(page)).mode, { timeout: 5_000 }).toBe('LIVE');
+  await expect.poll(async () => (await mlf(page)).isPassPlay, { timeout: 5_000 }).toBe(true);
 
   // Open the receiving windows with a *real* C (L) key press. The same press must
   // open the windows WITHOUT also throwing to receiver C (the player then gets to
@@ -85,7 +85,7 @@ test('carrier walks into a grave → hazard hit and casualty render', async ({ p
   // Run play (index 0) so the carrier is on-field in the graveyard.
   await tap(page, pickKey(0));
   await tap(page, P1.C);
-  expect((await mlf(page)).mode).toBe('LIVE');
+  await expect.poll(async () => (await mlf(page)).mode, { timeout: 5_000 }).toBe('LIVE');
 
   // Find the first open grave and walk the carrier onto it (deterministic seed).
   const hazards = (await mlf(page)).hazards;
