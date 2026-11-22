@@ -16,6 +16,7 @@ import {
   projectToScreen,
   toPhaserColor,
 } from '@monster-league/shared-core';
+import { InputManager, type InputSnapshot, type ArcadeButton } from '@monster-league/shared-core';
 import { GameSession, type Slot } from '../sim/index';
 import { buildLivePlayInput, projectActor } from '../field/fieldMapper';
 import { LivePlay, type LiveActorState, type LivePlayResult } from '../field/LivePlay';
@@ -148,7 +149,6 @@ export class MatchScene extends Phaser.Scene {
   private gameOver = false;
   private highlightDefender = -1;
   private inputPollTimer = 0;
-  private steer = { x: 0, y: 0 };
   /** Fingerprint of the last huddle overlay build; skips redundant DOM rebuilds. */
   private huddleFingerprint = '';
 
@@ -225,8 +225,6 @@ export class MatchScene extends Phaser.Scene {
    *  that very same press never doubles as a throw to receiver C (the player must be
    *  able to choose A or B, or re-press C deliberately, after opening). */
   private windowOpenPressConsumed = false;
-  /** Previous frame's C `isDown`, for up→down edge detection in `sampleInput`. */
-  private prevCHeld = false;
   /** Deterministic check used to trigger the first hazard for the e2e path. */
   private hazardArmedForDemo = true;
   /** Accumulates render time toward fixed 60 Hz sim steps (real-time pacing). */
@@ -266,7 +264,18 @@ export class MatchScene extends Phaser.Scene {
    *  is in flight or loose, the receiver on a completion, null on a pick/incomplete. */
   private ballHolderId: string | null = null;
 
-  private pressed = new Set<number>();
+  /** Unified Genesis 3-button + 360° input (keyboard/gamepad/touch). All game
+   *  input flows through this one source of truth — no raw Phaser key polling. */
+  private inputManager = new InputManager();
+  /** Latest polled snapshot for the human player (P1, slot 0). */
+  private playerInput: InputSnapshot = {
+    x: 0,
+    y: 0,
+    buttons: { A: false, B: false, C: false, START: false },
+    pressed: { A: false, B: false, C: false, START: false },
+  };
+  /** Snapshot as of the previous poll, for hold/release edge detection. */
+  private prevInput: InputSnapshot = this.playerInput;
 
   constructor() {
     super('match');
@@ -314,6 +323,11 @@ export class MatchScene extends Phaser.Scene {
     this.live = null;
     this.liveResult = null;
     this.gameOver = false;
+
+    // All game input routes through the shared InputManager (keyboard + gamepad +
+    // touch) with edge-buffered presses. Attach here — not in the constructor —
+    // so a single scene controls the window listener and detaches on shutdown.
+    this.inputManager.attach(window);
 
     // Bootstrap a session to the first huddle: home receives the opening kick.
     this.session = new GameSession({
@@ -365,6 +379,13 @@ export class MatchScene extends Phaser.Scene {
     this.refreshUi();
   }
 
+  /** Release the window-level keyboard listeners when the scene stops (Phaser
+   *  calls this on scene shutdown/restart); the InputManager is re-attached in
+   *  `create()` on the next boot. */
+  shutdown(): void {
+    this.inputManager.detach();
+  }
+
   override update(_time: number, delta: number): void {
     const dt = Math.min(delta, 50) / 1000;
     this.renderDt = dt;
@@ -393,67 +414,35 @@ export class MatchScene extends Phaser.Scene {
   // ------------------------------------------------------------- inputs
 
   private sampleInput(dt: number): void {
+    // Poll at a fixed 60 Hz so edge presses and holds land on the same cadence
+    // regardless of render refresh rate. `InputManager.poll` accumulates
+    // keydown/touch/gamepad edges between polls, so a fast sub-frame tap is still
+    // delivered exactly once (the root of the dropped-tap defect on the raw
+    // `JustDown` path, which only saw a key if it was held across two frames).
     this.inputPollTimer -= dt;
-    if (this.inputPollTimer > 0) {
-      // A skipped poll must not leak the previous frame's edge presses into the
-      // next mode handler, or one press can re-fire (e.g. C both picks *and*
-      // snaps when a poll is skipped between them). Clear now.
-      this.pressed.clear();
-      return;
-    }
+    if (this.inputPollTimer > 0) return;
     this.inputPollTimer = 1 / 60;
 
-    const kb = this.input.keyboard!;
-    const left = kb.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT).isDown;
-    const right = kb.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT).isDown;
-    const up = kb.addKey(Phaser.Input.Keyboard.KeyCodes.UP).isDown;
-    const down = kb.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN).isDown;
-    this.steer.x = (right ? 1 : 0) - (left ? 1 : 0);
-    this.steer.y = (down ? 1 : 0) - (up ? 1 : 0);
+    this.prevInput = this.playerInput;
+    this.playerInput = this.inputManager.poll(0);
 
-    for (const code of [KeyA, KeyB, KeyC] as const) {
-      if (Phaser.Input.Keyboard.JustDown(kb.addKey(code))) this.pressed.add(code);
-    }
-
-    // A *fresh* C keydown (up→down transition) re-arms the pass window consume so a
-    // genuinely new C press can throw to receiver C. Clearing on release instead
-    // (as `isDown` flips false) lets the opening press still double-fire across the
-    // leftover latched `pressed` state; edge-detect here so the latch holds exactly
-    // one press.
-    if (!this.prevCHeld && kb.addKey(KeyC).isDown) this.windowOpenPressConsumed = false;
-    this.prevCHeld = kb.addKey(KeyC).isDown;
+    // A *fresh* C press re-arms the pass-window consume (and throw-to-C) latch: the
+    // opening press consumed itself, and a genuinely new C keydown must be allowed
+    // to throw to receiver C. Edge-detect here so the latch holds exactly one press.
+    if (this.playerInput.pressed.C) this.windowOpenPressConsumed = false;
   }
 
-  private wasPressed(code: number): boolean {
-    return this.pressed.has(code);
+  /** Button held this poll (level, for steering/turbo/hold-to-throw). */
+  private buttonHeld(b: ArcadeButton): boolean {
+    return this.playerInput.buttons[b];
   }
-
-  // --------------------------------------------------------- pick / presnap
-
-  private updatePick(): void {
-    if (this.gameOver) return;
-    // The pick list depends on the down: 4th down offers special teams (punt/FG).
-    const catalog = catalogForDown(this.session.down);
-    if (this.wasPressed(KeyA)) this.selectedPlayIndex = 0;
-    else if (this.wasPressed(KeyB)) this.selectedPlayIndex = 1;
-    else if (this.wasPressed(KeyC)) this.selectedPlayIndex = 2;
-    else if (this.justLeft())
-      this.selectedPlayIndex = (this.selectedPlayIndex + 2) % catalog.length;
-    else if (this.justRight())
-      this.selectedPlayIndex = (this.selectedPlayIndex + 1) % catalog.length;
-    else return;
-    this.confirmPlay(this.selectedPlayIndex);
+  /** Button freshly pressed this poll (edge — a tap, consumed exactly once). */
+  private pressedBtn(b: ArcadeButton): boolean {
+    return this.playerInput.pressed[b];
   }
-
-  private justLeft(): boolean {
-    return Phaser.Input.Keyboard.JustDown(
-      this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT),
-    );
-  }
-  private justRight(): boolean {
-    return Phaser.Input.Keyboard.JustDown(
-      this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT),
-    );
+  /** Button released this poll (level true → false, for hold-to-throw/kick lock). */
+  private releasedBtn(b: ArcadeButton): boolean {
+    return this.prevInput.buttons[b] && !this.playerInput.buttons[b];
   }
 
   private confirmPlay(index: number): void {
@@ -466,8 +455,32 @@ export class MatchScene extends Phaser.Scene {
     this.prepareLivePlay();
   }
 
+  private updatePick(): void {
+    if (this.gameOver) return;
+    // The pick list depends on the down: 4th down offers special teams (punt/FG).
+    const catalog = catalogForDown(this.session.down);
+    if (this.pressedBtn('A')) this.selectedPlayIndex = 0;
+    else if (this.pressedBtn('B')) this.selectedPlayIndex = 1;
+    else if (this.pressedBtn('C')) this.selectedPlayIndex = 2;
+    else if (this.steerLeftEdge())
+      this.selectedPlayIndex = (this.selectedPlayIndex + catalog.length - 1) % catalog.length;
+    else if (this.steerRightEdge())
+      this.selectedPlayIndex = (this.selectedPlayIndex + 1) % catalog.length;
+    else return;
+    this.confirmPlay(this.selectedPlayIndex);
+  }
+
+  /** D-pad/stick left as a fresh edge (analog level crossing -0.5 from above). */
+  private steerLeftEdge(): boolean {
+    return this.prevInput.x > -0.5 && this.playerInput.x <= -0.5;
+  }
+  /** D-pad/stick right as a fresh edge. */
+  private steerRightEdge(): boolean {
+    return this.prevInput.x < 0.5 && this.playerInput.x >= 0.5;
+  }
+
   private updatePreSnap(): void {
-    if (this.wasPressed(KeyC)) this.beginLivePlay();
+    if (this.pressedBtn('C')) this.beginLivePlay();
   }
 
   /** Build the 14-actor `LivePlay` and reset per-down presentation state. Safe to
@@ -577,7 +590,7 @@ export class MatchScene extends Phaser.Scene {
       return;
     }
 
-    if (this.wasPressed(KeyB) && !this.isPassPlay) {
+    if (this.pressedBtn('B') && !this.isPassPlay) {
       // Defense: cycle which defender is the highlighted "user" pursuer.
       this.highlightDefender = (this.highlightDefender + 1) % 7;
     }
@@ -585,14 +598,13 @@ export class MatchScene extends Phaser.Scene {
     // Pass plays: C opens the receiving windows (scope: behind LOS); A/B/C throw
     // to the matching receiver while the windows are open. Hold length sets style.
     if (this.isPassPlay) {
-      const kb = this.input.keyboard!;
-      const cHeld = kb.addKey(KeyC).isDown;
+      const cHeld = this.buttonHeld('C');
 
       // The C press that opens the windows must NOT also throw to receiver C in
       // the same press: it is consumed once. Only a *fresh* subsequent C press (its
       // own keydown) — while windows are already open — is treated as a throw to C.
       // When windows are still closed, the same C press only opens them.
-      if (this.wasPressed(KeyC) && !this.windowsOpen && !this.windowOpenPressConsumed) {
+      if (this.pressedBtn('C') && !this.windowsOpen && !this.windowOpenPressConsumed) {
         // Windows may only open while the QB is behind (or on) the line of
         // scrimmage. Once the QB scrambles downfield the option is unavailable.
         const qb = live.snapshot().actors.find((a) => a.id === live.carrier.id);
@@ -600,29 +612,29 @@ export class MatchScene extends Phaser.Scene {
           this.windowsOpen = true;
           this.passHoldMs = 0;
           // Consume this C press so it cannot double as a throw, until a genuinely
-          // new C keydown arrives (cleared in `sampleInput` on the next edge).
+          // new C keydown arrives (cleared on the next input edge).
           this.windowOpenPressConsumed = true;
         }
       }
       // A fresh C keydown re-arms the throw-to-C path (and window re-open); cleared
-      // per-input-edge in `sampleInput` so holding C through several render frames
-      // never re-opens the windows and never re-fires the opening consume.
+      // per-input-edge so holding C through several render frames never re-opens the
+      // windows and never re-fires the opening consume.
 
       if (this.windowsOpen) {
         // A/B throw on *release*, so a held receiver button accumulates hold time
         // and only launches (lob vs bullet by duration) when the player lets go.
-        if (kb.addKey(KeyA).isDown) {
+        if (this.buttonHeld('A')) {
           if (!this.heldThrowKey) this.heldThrowKey = 'A';
-        } else if (kb.addKey(KeyB).isDown) {
+        } else if (this.buttonHeld('B')) {
           if (!this.heldThrowKey) this.heldThrowKey = 'B';
         }
-        const aUp = Phaser.Input.Keyboard.JustUp(kb.addKey(KeyA));
-        const bUp = Phaser.Input.Keyboard.JustUp(kb.addKey(KeyB));
+        const aUp = this.releasedBtn('A');
+        const bUp = this.releasedBtn('B');
         const released =
           this.heldThrowKey === 'A' && aUp ? 'A' : this.heldThrowKey === 'B' && bUp ? 'B' : null;
         // C throws to receiver C, but only on a deliberate press AFTER the window-
         // opening press (so opening the windows never instantly picks C).
-        const cUp = Phaser.Input.Keyboard.JustUp(kb.addKey(KeyC));
+        const cUp = this.releasedBtn('C');
         const cTarget = !this.windowOpenPressConsumed && cUp ? 'C' : null;
 
         // Accumulate hold time by *elapsed* time (seconds → ms), not a fixed 16 ms
@@ -649,8 +661,8 @@ export class MatchScene extends Phaser.Scene {
     // Feed the carrier command *inside* the fixed-step loop below, because the
     // nasty-field snapshot (hex inversion, Bat-Wing speed, grenade triggers) is
     // computed per step and must color the very same command that step consumes.
-    const turboHeld = this.input.keyboard!.addKey(KeyC).isDown;
-    const pressedBThisTick = this.wasPressed(KeyB) && this.isPassPlay === false;
+    const turboHeld = this.buttonHeld('C');
+    const pressedBThisTick = this.pressedBtn('B') && this.isPassPlay === false;
 
     // Advance a fixed-timestep 60 Hz simulation: accumulate the elapsed render
     // time and consume exactly the fixed steps due, so the field runs at real time
@@ -672,14 +684,14 @@ export class MatchScene extends Phaser.Scene {
         effects: this.session.effects,
         t: this.liveElapsed,
         pressedB: pressedBThisTick,
-        pressedC: this.wasPressed(KeyC),
+        pressedC: this.pressedBtn('C'),
         carrierTeam: carrier0?.team ?? this.session.possession,
         carrierSlot: carrier0?.slot ?? 'RB1',
       });
 
       // Hex of Confusion inverts the carrier's steering while its timer is live.
-      let sx = this.steer.x;
-      let sy = this.steer.y;
+      let sx = this.playerInput.x;
+      let sy = this.playerInput.y;
       if (this.nastySnap.hexRemaining > 0) {
         sx = -sx;
         sy = -sy;
@@ -688,7 +700,7 @@ export class MatchScene extends Phaser.Scene {
       live.command({
         steerX: sx,
         steerY: sy,
-        dive: this.wasPressed(KeyA) && !this.isPassPlay,
+        dive: this.pressedBtn('A') && !this.isPassPlay,
         turbo: turboHeld,
         frictionMult: this.lastFriction,
         slowMult: this.lastSlow,
@@ -766,8 +778,7 @@ export class MatchScene extends Phaser.Scene {
    */
   private updateKick(dt: number): void {
     const play = catalogForDown(this.session.down)[this.selectedPlayIndex]!;
-    const kb = this.input.keyboard!;
-    const cHeld = kb.addKey(KeyC).isDown;
+    const cHeld = this.buttonHeld('C');
 
     if (this.kickLocked === null) {
       if (cHeld) {
@@ -2158,7 +2169,3 @@ export class MatchScene extends Phaser.Scene {
     };
   }
 }
-
-const KeyA = Phaser.Input.Keyboard.KeyCodes.A;
-const KeyB = Phaser.Input.Keyboard.KeyCodes.B;
-const KeyC = Phaser.Input.Keyboard.KeyCodes.C;
