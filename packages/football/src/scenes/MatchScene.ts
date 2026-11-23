@@ -1281,7 +1281,10 @@ export class MatchScene extends Phaser.Scene {
       const maxX = Math.max(farR.x, nearR.x);
       const w = maxX - minX;
       const h = CANVAS_HEIGHT;
-      const tile = this.add.tileSprite(minX + w / 2, h / 2, w, h, key).setOrigin(0.5, 0.5).setDepth(-1);
+      const tile = this.add
+        .tileSprite(minX + w / 2, h / 2, w, h, key)
+        .setOrigin(0.5, 0.5)
+        .setDepth(-1);
       return tile;
     };
 
