@@ -176,6 +176,10 @@ export class MatchScene extends Phaser.Scene {
   private firstDownFieldX = 0;
   /** Count of sprite-backed actors (14 + referee) rendered last frame. */
   private spriteBackedActorCount = 0;
+  /** Last-drawn carrier's projected screen-space position and depth scale, cached
+   *  each frame in `drawActors` so the e2e suite can assert the controlled player's
+   *  on-screen sprite is readable (≥48 CSS px tall) without bypassing input. */
+  private carrierScreen: { px: number; py: number; scale: number } | null = null;
   /** Hazard terrain drawn on its own layer above the static field so mines that
    *  detonate/clear (and geysers that re-arm) can be redrawn without repainting. */
   private hazardGfx!: Phaser.GameObjects.Graphics;
@@ -233,6 +237,13 @@ export class MatchScene extends Phaser.Scene {
    *  movement on the next fixed step (graveyard tombstones impede, swamp slows). */
   private lastFriction = 1;
   private lastSlow = 1;
+
+  /** Presentation camera: frames a ~37-yard window around the ball and zooms out
+   *  smoothly for deep passes and kicks. `camX`/`camY` are the world-space focus
+   *  point (screen space, pre-zoom); `camZoom` is the current render zoom. */
+  private camX = CANVAS_WIDTH / 2;
+  private camY = -20;
+  private camZoom = 2.2;
 
   /** Ball in flight (pass animation) — null when no ball is airborne. */
   private ballFlight: {
@@ -430,7 +441,47 @@ export class MatchScene extends Phaser.Scene {
     this.drawActors();
     this.drawOverlays(dt);
     this.redrawHazardsIfDirty();
+    this.updateCamera(dt);
     this.refreshUi();
+  }
+
+  /** Smoothly follow the ball and frame ~35–40 yards around it, zooming out for
+   *  deep passes and kicks so the flight stays in frame. The target is computed in
+   *  world (pre-zoom) screen space; the camera is applied as an integer-friendly
+   *  zoom + scroll on `cameras.main` so every world object (turf, lines, actors,
+   *  overlays) transforms together without a per-projection rewrite. */
+  private updateCamera(dt: number): void {
+    let tx = CANVAS_WIDTH / 2;
+    let ty = CANVAS_HEIGHT * 0.45;
+    let targetZoom = 2.2;
+
+    // Focus on the ball: the carrier in the huddle/pre-snap/live, the flight path
+    // midpoint while airborne, or the LOS otherwise.
+    const carrier = this.live?.carrier;
+    if (this.ballFlight) {
+      const from = projectToScreen(this.ballFlight.fromX, this.ballFlight.fromY);
+      const to = projectToScreen(this.ballFlight.toX, this.ballFlight.toY);
+      tx = (from.x + to.x) / 2;
+      ty = (from.y + to.y) / 2 - 24;
+      targetZoom = 1.35; // wide enough to keep both the QB and the target visible
+    } else if (carrier) {
+      const f = projectActor(carrier.x, carrier.y, this.liveLos);
+      const s = projectToScreen(f.x, f.y);
+      tx = s.x;
+      ty = s.y - 6;
+      // Deep pass: the QB drops back and throws; widen the window pre-throw.
+      targetZoom = this.isPassPlay ? 1.6 : 2.2;
+    }
+
+    // Smooth-lerp the focus and zoom so the camera glides rather than snaps.
+    const k = 1 - Math.exp(-dt * 6);
+    this.camX += (tx - this.camX) * k;
+    this.camY += (ty - this.camY) * k;
+    this.camZoom += (targetZoom - this.camZoom) * (1 - Math.exp(-dt * 3));
+
+    const cam = this.cameras.main;
+    cam.setZoom(this.camZoom);
+    cam.centerOn(this.camX, this.camY);
   }
 
   // ------------------------------------------------------------- inputs
@@ -1230,23 +1281,8 @@ export class MatchScene extends Phaser.Scene {
       const maxX = Math.max(farR.x, nearR.x);
       const w = maxX - minX;
       const h = CANVAS_HEIGHT;
-      const tile = this.add
-        .tileSprite(minX + w / 2, h / 2, w, h, key)
-        .setDepth(-1)
-        .setOrigin(0.5, 0.5);
-
-      // Clip the tiling sprite to this region's trapezoid (its four projected
-      // corners, drawn as two triangles like `perspectiveQuad`). Canvas renderer
-      // supports geometry masks; the mask Graphics is invisible (draw-only).
-      const maskGfx = this.add.graphics();
-      // A geometry mask Graphics object is still a visible scene object; hide its
-      // own rendering so the opaque triangles never cover the turf/markings while
-      // still clipping the tile sprite to the region's projected trapezoid.
-      maskGfx.setVisible(false);
-      maskGfx.fillStyle(0xffffff, 1);
-      maskGfx.fillTriangle(farL.x, farL.y, farR.x, farR.y, nearR.x, nearR.y);
-      maskGfx.fillTriangle(farL.x, farL.y, nearR.x, nearR.y, nearL.x, nearL.y);
-      tile.setMask(maskGfx.createGeometryMask());
+      const tile = this.add.tileSprite(minX + w / 2, h / 2, w, h, key).setOrigin(0.5, 0.5).setDepth(-1);
+      return tile;
     };
 
     drawRegion(0, 10, endzone);
@@ -1261,6 +1297,28 @@ export class MatchScene extends Phaser.Scene {
     // sprites don't cover. Painting an opaque rectangle on this Graphics layer's
     // depth 0 would sit *above* those arena images and hide the turf. The
     // line-work below is translucent and belongs above the turf.
+
+    // Arena surround: the field is a perspective trapezoid whose two far corners
+    // pull in from the canvas top. The corner wedges left behind must read as
+    // "ground outside the field" (CRYPT_SLATE) — not unrendered void or leached
+    // turf — so paint both wedges here, above the turf band, before the markings.
+    const tlOut = projectToScreen(0, 0);
+    const trOut = projectToScreen(120, 0);
+    const blOut = projectToScreen(0, 53);
+    const brOut = projectToScreen(120, 53);
+    g.fillStyle(toPhaserColor('CRYPT_SLATE'), 1);
+    // Top-left wedge: (0,0) → (far-left) → (near-left).
+    g.fillTriangle(0, 0, tlOut.x, tlOut.y, blOut.x, blOut.y);
+    // Top-right wedge: (640,0) → (far-right) → (near-right).
+    g.fillTriangle(CANVAS_WIDTH, 0, trOut.x, trOut.y, brOut.x, brOut.y);
+
+    // Solid sideline borders on all four field edges so the bands read cleanly
+    // against the surround (no clipped/detached edges).
+    g.lineStyle(2, toPhaserColor('BONE_WHITE'), 0.9);
+    g.lineBetween(tlOut.x, tlOut.y, trOut.x, trOut.y); // far sideline (top)
+    g.lineBetween(blOut.x, blOut.y, brOut.x, brOut.y); // near sideline (bottom)
+    g.lineBetween(tlOut.x, tlOut.y, blOut.x, blOut.y); // left diagonal
+    g.lineBetween(trOut.x, trOut.y, brOut.x, brOut.y); // right diagonal
 
     // End-zone tint quads (the turf/end-zone sprites fill them; these add a faint
     // faction-color wash). The field of play is now the turf sprite, so no quad here.
@@ -1277,9 +1335,11 @@ export class MatchScene extends Phaser.Scene {
       if (!major) this.drawHashes(g, x);
     }
 
-    // Yard numbers sit *between* the 10-yard lines (x = 15, 25, … 105) so they
-    // are never crossed by a yard line. Labels use field-aware yardage.
-    for (let x = 15; x <= 105; x += 10) {
+    // Yard numbers sit *between* the 10-yard lines. Nine labels span the field
+    // 10 → 20 → 30 → 40 → 50 → 40 → 30 → 20 → 10 exactly once each: the "10" appears
+    // at BOTH ends (x=15 and x=95) but never doubled on one end (the old x=105 slot
+    // duplicated the goal-line "10").
+    for (let x = 15; x <= 95; x += 10) {
       this.drawYardNumber(g, x);
     }
 
@@ -1287,9 +1347,10 @@ export class MatchScene extends Phaser.Scene {
     const c = projectToScreen(60, 26.5);
     this.drawCrest(g, c.x, c.y, c.scale);
 
-    // Goalposts at each end.
-    this.drawGoalpost(g, projectToScreen(1, 26.5));
-    this.drawGoalpost(g, projectToScreen(119, 26.5));
+    // Goalposts at the back of each end zone (x≈0 and x≈120), anchored on the
+    // goal line and rotated none — they stand up out of the field.
+    this.drawGoalpost(g, projectToScreen(0.5, 26.5));
+    this.drawGoalpost(g, projectToScreen(119.5, 26.5));
   }
 
   private perspectiveQuad(
@@ -1410,12 +1471,18 @@ export class MatchScene extends Phaser.Scene {
   }
 
   private drawGoalpost(g: DrawSurface, base: { x: number; y: number; scale: number }): void {
-    const h = 26 * base.scale;
-    const w = 9 * base.scale;
-    g.lineStyle(2, toPhaserColor('IRON_BEZEL'), 1);
-    g.lineBetween(base.x - w, base.y, base.x - w, base.y - h);
-    g.lineBetween(base.x + w, base.y, base.x + w, base.y - h);
-    g.lineBetween(base.x - w, base.y - h * 0.55, base.x + w, base.y - h * 0.55);
+    // Solid goalposts anchored at the back of each end zone: two filled uprights
+    // and a solid crossbar, sized to the depth scale so the near goalpost reads
+    // clearly while the far one stays proportional. The uprights sit on the back
+    // goal line and rise straight up (no detached "floating H" outline).
+    const u = Math.max(2, 3 * base.scale); // upright thickness
+    const h = 30 * base.scale; // upright height above the crossbar line
+    const w = 11 * base.scale; // half the crossbar span
+    const crossY = base.y - h * 0.45; // crossbar elevation
+    g.fillStyle(toPhaserColor('BONE_WHITE'), 1);
+    g.fillRect(base.x - w - u / 2, base.y - h - u, u, h); // left upright
+    g.fillRect(base.x + w - u / 2, base.y - h - u, u, h); // right upright
+    g.fillRect(base.x - w, crossY - u / 2, w * 2, u); // crossbar
   }
 
   /** Redraw the hazard layer when armed state *or* a telegraphed geyser's
@@ -1533,6 +1600,14 @@ export class MatchScene extends Phaser.Scene {
         isHighlighted: hlId !== undefined && state.id === hlId,
       };
     });
+
+    // Cache the controlled carrier's projected footprint for the e2e readability
+    // assertion (read-only), so the spec can verify the on-screen sprite without
+    // interrogating Phaser internals or bypassing input.
+    const carrierActor = actors.find((a) => a.isCarrier) ?? null;
+    this.carrierScreen = carrierActor
+      ? { px: carrierActor.px, py: carrierActor.py, scale: carrierActor.scale }
+      : null;
 
     // Ground indicators render under every actor. The LOS/first-down lines and
     // selection ring are drawn below the actors so they never cover a sprite.
@@ -2098,6 +2173,8 @@ export class MatchScene extends Phaser.Scene {
     const lastResult = () => this.session?.lastResult ?? null;
     const hazardManager = () => this.hazardManager;
     const spriteBackedActors = () => this.spriteBackedActorCount;
+    const carrierScreen = () => this.carrierScreen;
+    const camZoom = () => this.camZoom;
     const bannerKind = () => this.bannerKind;
     const aiDecision = () => {
       // Debug probe only: "what would the AI coach call for the team currently in
@@ -2177,6 +2254,15 @@ export class MatchScene extends Phaser.Scene {
       // to a flat rectangle.
       get spriteBackedActors() {
         return spriteBackedActors();
+      },
+      // Read-only render seam for the readability acceptance: the controlled
+      // player's projected screen-space footprint plus the live camera zoom, so
+      // a spec can compute the on-screen sprite height (48 backing px × depth
+      // scale × camera zoom × integer CSS scale) and assert it stays readable.
+      get carrierScreen() {
+        const c = carrierScreen();
+        if (!c) return null;
+        return { px: c.px, py: c.py, scale: c.scale, camZoom: camZoom() };
       },
       pick: (i: number) => {
         this.selectedPlayIndex = Math.max(0, Math.min(2, Number(i) || 0));
