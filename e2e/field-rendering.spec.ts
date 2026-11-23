@@ -135,3 +135,32 @@ test('controlled player renders at least 48 CSS px tall at 1280x800', async ({ p
   const cssHeight = SPRITE_BACKING * carrier!.scale * carrier!.camZoom * cssScale;
   expect(cssHeight).toBeGreaterThanOrEqual(48);
 });
+
+test('narrow viewport falls back to fluid width without horizontal overflow', async ({ page }) => {
+  // A sub-640 viewport cannot integer-scale to 1x without overflowing; the
+  // canvas must fall back to `max-width:100%` fluid sizing instead of a
+  // fixed 640px backing size spilling out of the window.
+  await page.setViewportSize({ width: 480, height: 800 });
+  await openField(page);
+
+  const r = await page.evaluate(() => {
+    const c = document.querySelector<HTMLCanvasElement>('#game canvas')!;
+    const rect = c.getBoundingClientRect();
+    return {
+      cssW: rect.width,
+      cssH: rect.height,
+      maxWidth: getComputedStyle(c).maxWidth,
+      right: rect.right,
+      viewportW: window.innerWidth,
+    };
+  });
+  // The canvas must fit the 480px viewport (no fixed 640px spill) and use the
+  // shared `.gsn-canvas-bezel canvas { max-width:100% }` clamp. The HUD/scorebug
+  // chrome has its own (separate) responsive rules and is out of scope here; we
+  // assert on the canvas element this fix owns.
+  expect(r.maxWidth).toBe('100%');
+  expect(r.cssW).toBeLessThanOrEqual(480);
+  expect(r.cssW).toBeGreaterThan(0);
+  expect(r.cssH).toBeGreaterThan(0);
+  expect(r.right).toBeLessThanOrEqual(r.viewportW + 1);
+});

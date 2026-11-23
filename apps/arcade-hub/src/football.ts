@@ -52,9 +52,22 @@ function applyIntegerScale(): void {
   const widthScale = Math.floor(availW / CANVAS_BACKING_W);
   const heightScale = Math.floor(availH / CANVAS_BACKING_H);
   const scale = Math.max(1, Math.min(widthScale, Math.max(1, heightScale)));
-  canvas.style.maxWidth = 'none';
-  canvas.style.width = `${CANVAS_BACKING_W * scale}px`;
-  canvas.style.height = `${CANVAS_BACKING_H * scale}px`;
+
+  if (scale >= 1 && widthScale >= 1 && heightScale >= 1) {
+    // Integer-scale to the largest nearest-neighbour multiple that fits. Reverts
+    // the shared `max-width:100%` clamp so the integer-sized canvas isn't smeared.
+    canvas.style.maxWidth = 'none';
+    canvas.style.width = `${CANVAS_BACKING_W * scale}px`;
+    canvas.style.height = `${CANVAS_BACKING_H * scale}px`;
+    return;
+  }
+
+  // Narrow/short viewport (< 640 wide): an integer scale would overflow the
+  // window, so fall back to the fluid `max-width:100%` clamp from
+  // `.gsn-canvas-bezel canvas` and let the backing aspect ratio stretch down.
+  canvas.style.maxWidth = '100%';
+  canvas.style.width = '100%';
+  canvas.style.height = 'auto';
 }
 // The canvas mounts inside `#game` synchronously at `bootFootball` creation, but
 // defer one frame so Phaser has the element in the DOM before we restyle it.

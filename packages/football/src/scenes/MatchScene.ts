@@ -19,6 +19,7 @@ import {
 import { InputManager, type InputSnapshot, type ArcadeButton } from '@monster-league/shared-core';
 import { GameSession, type Slot } from '../sim/index';
 import { buildLivePlayInput, projectActor } from '../field/fieldMapper';
+import { yardNumberLabel } from './fieldTextures';
 import { LivePlay, type LiveActorState, type LivePlayResult } from '../field/LivePlay';
 import { HazardManager } from '../field/HazardManager';
 import { resolvePassAttempt, resolveScrambleOutcome } from '../field/PlayOrchestrator';
@@ -482,6 +483,26 @@ export class MatchScene extends Phaser.Scene {
     const cam = this.cameras.main;
     cam.setZoom(this.camZoom);
     cam.centerOn(this.camX, this.camY);
+    // Clamp the camera to the arena so the view never pans into the VOID_BLACK
+    // surround at the end zones / sidelines. The field projects to the full
+    // 640×360 canvas, so at zoom > 1 the visible world area shrinks and the centre
+    // must stay inset by half the visible width/height to keep the viewport on
+    // turf. Zoom < 1 (never used) or a viewport wider/taller than the arena is
+    // guarded below.
+    const halfW = CANVAS_WIDTH / (2 * this.camZoom);
+    const halfH = CANVAS_HEIGHT / (2 * this.camZoom);
+    if (2 * halfW >= CANVAS_WIDTH) {
+      cam.centerOn(CANVAS_WIDTH / 2, Math.max(0, Math.min(CANVAS_HEIGHT, this.camY)));
+      return;
+    }
+    if (2 * halfH >= CANVAS_HEIGHT) {
+      cam.centerOn(this.camX, CANVAS_HEIGHT / 2);
+      return;
+    }
+    cam.centerOn(
+      Math.max(halfW, Math.min(CANVAS_WIDTH - halfW, this.camX)),
+      Math.max(halfH, Math.min(CANVAS_HEIGHT - halfH, this.camY)),
+    );
   }
 
   // ------------------------------------------------------------- inputs
@@ -1255,41 +1276,57 @@ export class MatchScene extends Phaser.Scene {
    * Tiled arena turf + end-zone sprites under the line-work. The home faction's
    * arena (REAPERS → cursed_graveyard) supplies the 64×64 tiles. Because the
    * projection is a perspective trapezoid, each field region (two end zones and
-   * the field of play between them) is drawn as its **own** horizontal band:
-   * the band's left/right edges come from the region's *projected* near corners,
-   * so the three regions sit side-by-side instead of overlapping one rectangle.
+   * the field of play between them) is drawn as its **own** horizontal band whose
+   * left/right edges follow the projected corners, so the three regions sit
+   * side-by-side instead of overlapping one rectangle.
+   *
+   * The Phaser **canvas** renderer clamps a geometry mask to a near-point
+   * triangle, so we don't use `createGeometryMask` here. Instead each region is
+   * sliced into thin horizontal `tileSprite` bands: every band is a plain
+   * rectangle spanning the region's x-range at that row, and the bands' tapered
+   * widths trace the trapezoid's left/right edges. Bands overlap their neighbours
+   * by 1px so the tile lines never gap, and the region boundaries land exactly on
+   * the x=10/110 goal lines, so the end-zone and field-of-play textures never
+   * bleed across each other.
    */
   private drawFieldSprites(): void {
     const turf = 'cursed_graveyard_turf';
     const endzone = 'cursed_graveyard_endzone';
     if (!this.textures.exists(turf)) return;
 
-    // Each region is a horizontal *band of the trapezoid*, not a full-height
-    // rectangle: the four projected corners of a region define a trapezoid whose
-    // far edge (y=0) is narrower than its near edge (y=53). A full-height rectangle
-    // would paint turf beyond the far-edge field bounds and leave the end zones'
-    // far edges untextured. Draw a tiling sprite sized to the region's screen
-    // bounding box, then clip it to the region's four projected corners with a
-    // geometry mask so texture never leaks across a boundary.
+    // Slice the field height (53 yd) into thin bands. Each band is a full-width
+    // rectangle at that row whose x-range is the region's projected span; stacked
+    // top-to-bottom they trace the perspective trapezoid without a mask.
+    const BANDS = 20;
     const drawRegion = (x0: number, x1: number, key: string) => {
-      // Field x is 0..120; x0/x1 clip to the projection's valid range.
-      const farL = projectToScreen(x0, 0);
-      const farR = projectToScreen(x1, 0);
-      const nearR = projectToScreen(x1, 53);
-      const nearL = projectToScreen(x0, 53);
-      const minX = Math.min(farL.x, nearL.x);
-      const maxX = Math.max(farR.x, nearR.x);
-      const w = maxX - minX;
-      const h = CANVAS_HEIGHT;
-      const tile = this.add
-        .tileSprite(minX + w / 2, h / 2, w, h, key)
-        .setOrigin(0.5, 0.5)
-        .setDepth(-1);
-      return tile;
+      for (let i = 0; i < BANDS; i++) {
+        // Field-y of the band's centre row (0 = far edge, 53 = near edge). The
+        // near edge (bottom) is *below* the far edge on screen.
+        const y0 = (i / BANDS) * 53;
+        const y1 = ((i + 1) / BANDS) * 53;
+        const farL = projectToScreen(x0, y0);
+        const farR = projectToScreen(x1, y0);
+        const nearR = projectToScreen(x1, y1);
+        const nearL = projectToScreen(x0, y1);
+        // Left edge is the min of the two left corners, right the max of the two
+        // right corners; overdraw 1px horizontally so neighbouring bands tile
+        // without a gap along the tapered (non-vertical) boundary.
+        const left = Math.min(farL.x, nearL.x) - 1;
+        const right = Math.max(farR.x, nearR.x) + 1;
+        const w = right - left;
+        const cy = (farL.y + nearL.y) / 2;
+        const h = Math.max(1, nearL.y - farL.y) + 1;
+        this.add
+          .tileSprite(left + w / 2, cy, w, h, key)
+          .setOrigin(0.5, 0.5)
+          .setDepth(-1);
+      }
     };
 
-    drawRegion(0, 10, endzone);
+    // Field of play first, end zones on top, so the (overdrawn 1px) end-zone
+    // edges sit exactly on the x=10/110 goal lines and never smear either way.
     drawRegion(10, 110, turf);
+    drawRegion(0, 10, endzone);
     drawRegion(110, 120, endzone);
   }
 
@@ -1338,11 +1375,11 @@ export class MatchScene extends Phaser.Scene {
       if (!major) this.drawHashes(g, x);
     }
 
-    // Yard numbers sit *between* the 10-yard lines. Nine labels span the field
-    // 10 → 20 → 30 → 40 → 50 → 40 → 30 → 20 → 10 exactly once each: the "10" appears
-    // at BOTH ends (x=15 and x=95) but never doubled on one end (the old x=105 slot
-    // duplicated the goal-line "10").
-    for (let x = 15; x <= 95; x += 10) {
+    // Yard numbers sit ON the 10-yard lines. Nine labels span the field
+    // 10 → 20 → 30 → 40 → 50 → 40 → 30 → 20 → 10 exactly once each: the "10"
+    // appears at BOTH ends (x=20 and x=100, ten yards inside each goal line) but
+    // never doubled on one end, and both halves mirror each other around midfield.
+    for (let x = 20; x <= 100; x += 10) {
       this.drawYardNumber(g, x);
     }
 
@@ -1382,14 +1419,11 @@ export class MatchScene extends Phaser.Scene {
   }
 
   private drawYardNumber(g: DrawSurface, x: number): void {
-    // Numbers sit *between* 10-yard lines (caller passes x = 15, 25, … 105), so
-    // derive the label from the distance to the *nearer* goal line (x=10 vs
-    // x=110), rounded to the nearest 10-yard marker. Own half counts up from its
-    // goal, far half counts down from midfield toward its goal, and the 5-yard
-    // goal band reads "10" rather than "0". This keeps the labels symmetric:
-    // x=15→"10", x=55→"50", x=65→"40", x=105→"10".
-    const d = Math.min(x - 10, 110 - x);
-    const label = d < 10 ? '10' : String((x > 60 ? Math.floor(d / 10) : Math.ceil(d / 10)) * 10);
+    // Numbers sit ON a 10-yard line (caller passes x = 20, 30, …, 100), so the
+    // label is the yard-line's distance to the *nearer* goal line (x=10 vs
+    // x=110) — the two halves mirror each other exactly: x=20→"10", x=60→"50",
+    // x=100→"10". The 10-yard band just inside each goal reads "10" (not "0").
+    const label = yardNumberLabel(x);
     const top = projectToScreen(x, 14);
     const bot = projectToScreen(x, 39);
     this.drawBlockText(g, label, top.x, top.y, top.scale);
