@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { join } from 'node:path';
 import { screenshotDir } from './screenshot-path';
 import { trackErrors } from './errors';
+import { P1, tap } from './keys';
 
 interface MlfHandle {
   phase: string;
@@ -10,12 +11,15 @@ interface MlfHandle {
   los: number;
   down: number;
   carrierId: string | null;
-  pick: (i: number) => void;
-  snap: () => void;
 }
 
 function mlf(page: Page): Promise<MlfHandle> {
   return page.evaluate(() => (window as unknown as { __mlf?: MlfHandle }).__mlf!);
+}
+
+/** Map a 0-based play card index to the real P1 key that calls it (A/B/C). */
+function pickKey(index: number): string {
+  return ([P1.A, P1.B, P1.C] as const)[index]!;
 }
 
 test('football boots into the play-call huddle with no console errors', async ({ page }) => {
@@ -40,26 +44,26 @@ test('pick → snap → live down ends and the GameSession commits the result', 
   await page.goto('/football/');
   await expect(page.locator('#game canvas')).toBeVisible();
 
-  // Call the first run play (A) and confirm we reach pre-snap.
-  await page.evaluate(() => (window as unknown as { __mlf?: MlfHandle }).__mlf!.pick(0));
+  // Call the first run play (A) with a real 30 ms tap and confirm pre-snap.
+  await tap(page, pickKey(0));
   expect((await mlf(page)).phase).toBe('PRE_SNAP');
   expect((await mlf(page)).mode).toBe('PRE_SNAP');
   // Incidental capture for this gameplay test — not the deliverable art. The
   // deliverable `football-presnap.png` is written solely by screenshots.spec.ts.
   await page.screenshot({ path: join(screenshotDir, 'football-presnap-run.png') });
 
-  // Snap into the live down.
-  await page.evaluate(() => (window as unknown as { __mlf?: MlfHandle }).__mlf!.snap());
+  // Snap into the live down with a real 30 ms C (L) tap.
+  await tap(page, P1.C);
   expect((await mlf(page)).mode).toBe('LIVE');
 
-  // Steer the carrier downfield and let the down play out.
-  await page.keyboard.down('ArrowRight');
+  // Steer the carrier downfield (P1 right = D) and let the down play out.
+  await page.keyboard.down(P1.right);
   await page.waitForTimeout(1000);
   // Mid-run capture while the down is still live. Incidental to this gameplay
   // test; the deliverable `football-midrun.png` is written by screenshots.spec.ts.
   await page.screenshot({ path: join(screenshotDir, 'football-midrun-run.png') });
   await page.waitForTimeout(1500);
-  await page.keyboard.up('ArrowRight');
+  await page.keyboard.up(P1.right);
 
   // The live down must conclude: after the whistle the field leaves LIVE and the
   // banner, settling into the next down (pre-snap or the next play call).
