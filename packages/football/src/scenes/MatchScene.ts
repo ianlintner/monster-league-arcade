@@ -387,7 +387,8 @@ export class MatchScene extends Phaser.Scene {
         backgroundColor: 'rgba(11,7,17,0.6)',
       })
       .setOrigin(0, 0)
-      .setDepth(100);
+      .setDepth(100)
+      .setScrollFactor(0); // pinned to the viewport so the camera zoom/scroll never drags it off-screen
     // The on-canvas instruction/debug text is a dev convenience; in production
     // builds game state lives in the HUD scorebug (see `updateDom`), so the
     // overlay is hidden entirely.
