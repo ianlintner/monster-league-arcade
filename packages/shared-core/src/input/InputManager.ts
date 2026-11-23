@@ -113,15 +113,27 @@ export class InputManager {
 
   private onKeyDown = (e: KeyboardEvent): void => {
     this.keys.add(e.code);
-    this.pressedKeys.add(e.code);
+    // Only latch a press edge when the key actually reaches the game: a key typed
+    // into a form field must not queue a game edge (nor be preventDefault'd).
     if (isInteractiveOrEditableTarget(e.target)) return;
+    // Ignore auto-repeat: only a fresh keydown (repeat === false) latches an edge,
+    // otherwise holding a key would re-fire "pressed" at the OS repeat rate — the
+    // old `JustDown` path did not.
+    if (!e.repeat) this.pressedKeys.add(e.code);
     if (ALL_MAPPED_CODES.has(e.code)) e.preventDefault();
   };
   private onKeyUp = (e: KeyboardEvent): void => {
     this.keys.delete(e.code);
   };
   private onBlur = (): void => {
+    // A window losing focus must drop both the held-key level state and any
+    // pending press-edge latches, otherwise a key pressed before blur (or a P2
+    // code the scene never polls for) would leave a stale edge that re-fires on
+    // the next relevant poll.
     this.keys.clear();
+    this.pressedKeys.clear();
+    this.pressedTouch[0].clear();
+    this.pressedTouch[1].clear();
   };
 
   attach(target: Window = window): void {

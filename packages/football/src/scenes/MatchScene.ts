@@ -328,6 +328,11 @@ export class MatchScene extends Phaser.Scene {
     // touch) with edge-buffered presses. Attach here — not in the constructor —
     // so a single scene controls the window listener and detaches on shutdown.
     this.inputManager.attach(window);
+    // Phaser does not call a method named `shutdown()` on the scene class; the
+    // lifecycle event is what actually fires when the scene stops. Subscribe here
+    // (rather than relying on an undocumented method name) so the window-level
+    // listeners are released when the scene shuts down or restarts.
+    this.events.once('shutdown', () => this.inputManager.detach());
 
     // Bootstrap a session to the first huddle: home receives the opening kick.
     this.session = new GameSession({
@@ -379,13 +384,6 @@ export class MatchScene extends Phaser.Scene {
     this.refreshUi();
   }
 
-  /** Release the window-level keyboard listeners when the scene stops (Phaser
-   *  calls this on scene shutdown/restart); the InputManager is re-attached in
-   *  `create()` on the next boot. */
-  shutdown(): void {
-    this.inputManager.detach();
-  }
-
   override update(_time: number, delta: number): void {
     const dt = Math.min(delta, 50) / 1000;
     this.renderDt = dt;
@@ -403,8 +401,15 @@ export class MatchScene extends Phaser.Scene {
       // auto-picks the currently-selected play so the drive can't stall on an idle
       // huddle. The penalty is applied inside `tickPlayClock`; here we just force
       // the pick so the down proceeds.
-      if (penalty?.kind === 'DELAY_OF_GAME' && this.mode === 'PICK') {
-        this.confirmPlay(this.selectedPlayIndex);
+      if (penalty?.kind === 'DELAY_OF_GAME') {
+        if (this.mode === 'PICK') {
+          this.confirmPlay(this.selectedPlayIndex);
+        } else if (this.mode === 'PRE_SNAP') {
+          // The penalty moved `session.los` back 5 yards, but the formation was
+          // built at pick time from the old LOS. Rebuild it so the actors, ball
+          // and first-down line sit at the penalised spot instead of the stale one.
+          this.prepareLivePlay();
+        }
       }
     }
 
@@ -447,6 +452,11 @@ export class MatchScene extends Phaser.Scene {
         ...this.playerInput,
         pressed: { A: false, B: false, C: false, START: false },
       };
+      // Advance `prevInput` too so release/stick edges (releasedBtn /
+      // steerLeftEdge / steerRightEdge) are not re-derived from the same stale
+      // prev/current pair on every render frame — a release would otherwise fire
+      // once per frame until the next real poll.
+      this.prevInput = this.playerInput;
       return;
     }
     this.inputPollTimer = 1 / 60;

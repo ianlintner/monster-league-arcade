@@ -111,6 +111,45 @@ describe('InputManager', () => {
     im.detach();
   });
 
+  it('ignores OS auto-repeat keydowns (no fresh press edge)', () => {
+    const im = new InputManager();
+    im.attach(window);
+    // A genuine keydown latches an edge.
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyL' }));
+    expect(im.poll(0).pressed.C).toBe(true);
+    // An auto-repeat of the same held key must NOT latch a new edge.
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyL', repeat: true }));
+    expect(im.poll(0).pressed.C).toBe(false);
+    // The key is still held (level state), just not freshly pressed.
+    expect(im.poll(0).buttons.C).toBe(true);
+    im.detach();
+  });
+
+  it('does not latch a press edge for keys typed into an editable field', () => {
+    const im = new InputManager();
+    im.attach(window);
+    const input = document.createElement('input');
+    document.body.append(input);
+    const ev = new KeyboardEvent('keydown', { code: 'KeyJ', bubbles: true, cancelable: true });
+    input.dispatchEvent(ev);
+    // No edge queued, and the native behaviour is not blocked.
+    expect(im.poll(0).pressed.A).toBe(false);
+    expect(ev.defaultPrevented).toBe(false);
+    input.remove();
+    im.detach();
+  });
+
+  it('clears pending press edges on window blur', () => {
+    const im = new InputManager();
+    im.attach(window);
+    // A P2 code the scene never polls for (poll(1) is unused) still latches.
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyC' }));
+    window.dispatchEvent(new KeyboardEvent('blur'));
+    // After blur the stale latch must be gone, not re-fired on a later poll.
+    expect(im.poll(1).pressed.C).toBe(false);
+    im.detach();
+  });
+
   it('detects a gamepad button false→true transition as a press edge', () => {
     const btn = (pressed: boolean) => ({ pressed, touched: false, value: 0 });
     const buttons = new Array(16).fill(btn(false));
