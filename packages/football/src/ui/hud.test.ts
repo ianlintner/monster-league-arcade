@@ -72,6 +72,21 @@ describe('GSN 66.6 Scorebug', () => {
     }
   });
 
+  it('rounds yardage for display and prints INCHES under a yard', () => {
+    expect(downDistanceLabel(2, 10.901356182310463)).toBe('2ND & 11');
+    expect(downDistanceLabel(1, 0.4)).toBe('1ST & INCHES');
+    expect(losLabel(74.90135618231047, 'home')).toBe('BALL ON OPP 25');
+  });
+
+  it('labels field position with football OWN/50/OPP notation', () => {
+    expect(losLabel(25, 'home')).toBe('BALL ON OWN 25');
+    expect(losLabel(1, 'away')).toBe('BALL ON OWN 1');
+    expect(losLabel(49, 'away')).toBe('BALL ON OWN 49');
+    expect(losLabel(50, 'home')).toBe('BALL ON 50');
+    expect(losLabel(51, 'home')).toBe('BALL ON OPP 49');
+    expect(losLabel(99, 'away')).toBe('BALL ON OPP 1');
+  });
+
   it('activates the bribed-ref badge only when a bribe is in effect', () => {
     const idle = buildScorebug(state()).querySelector('[data-testid="bribe-badge"]')!;
     expect(idle.getAttribute('data-active')).toBe('false');
@@ -99,7 +114,11 @@ describe('Huddle overlay', () => {
     expect(el.querySelector('[data-testid="play-b"]')).not.toBeNull();
     expect(el.querySelector('[data-testid="play-c"]')).not.toBeNull();
     expect(el.querySelector('[data-testid="nasty-drawer"]')?.textContent).toContain(
-      'PUMPKIN_BOMB_PASS',
+      'Pumpkin Bomb Pass',
+    );
+    expect(el.querySelector('[data-testid="nasty-drawer"]')?.textContent).toContain('2 charges');
+    expect(el.querySelector('[data-nasty="PUMPKIN_BOMB_PASS"]')?.textContent).toContain(
+      '[A→C → A]',
     );
   });
 });

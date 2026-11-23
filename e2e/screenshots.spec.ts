@@ -1,13 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { screenshotDir } from './screenshot-path';
+import { P1, tap } from './keys';
 
 // Captures the art-uplift deliverable as real, reproducible screenshots under
 // docs/screenshots/. The gallery page renders the regenerated assets at 4x
 // nearest-neighbour from the served bundle; the football route shows the field.
-const OUT = join(dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'screenshots');
-mkdirSync(OUT, { recursive: true });
 
 declare global {
   interface Window {
@@ -15,14 +14,24 @@ declare global {
       phase: string;
       mode: string;
       spriteBackedActors: number;
-      pick: (i: number) => void;
-      snap: () => void;
       openWindows: () => void;
       throwTo: (t: 'A' | 'B' | 'C') => void;
       forceCarrierTo: (x: number, y: number) => void;
     };
     __galleryReady?: Promise<void>;
   }
+}
+
+/** Map a 0-based play card index to the real P1 key that calls it (A/B/C). */
+function pickKey(index: number): string {
+  return ([P1.A, P1.B, P1.C] as const)[index]!;
+}
+
+/** Call a play card then snap the ball, driving real keyboard events. */
+async function callAndSnap(page: Page, index: number): Promise<void> {
+  await tap(page, pickKey(index));
+  await page.waitForTimeout(80);
+  await tap(page, P1.C);
 }
 
 test('captures the asset gallery screenshot', async ({ page }) => {
@@ -43,7 +52,7 @@ test('captures the asset gallery screenshot', async ({ page }) => {
     return imgs.every((i) => i.complete && i.naturalWidth > 0);
   });
   const buf = await page.screenshot({ fullPage: true });
-  writeFileSync(join(OUT, 'gallery.png'), buf);
+  writeFileSync(join(screenshotDir, 'gallery.png'), buf);
 });
 
 /** Open the football route and wait until the game scene has booted. */
@@ -60,7 +69,7 @@ test('football field renders sprite-backed actors, not rectangles', async ({ pag
   await openField(page);
   // Advance from the play-call huddle into the PRE_SNAP formation, where the
   // scene renders all 14 field players plus the referee in idle stance.
-  await page.evaluate(() => window.__mlf!.pick(0));
+  await tap(page, pickKey(0));
   await page.waitForTimeout(300);
   // No actor may regress to a flat rectangle: the scene must report 15
   // sprite-backed actors (14 field players + 1 referee).
@@ -72,56 +81,44 @@ test('captures the pre-snap formation screenshot', async ({ page }) => {
   await openField(page);
   // Confirm the opening play to reach the pre-snap huddle (idle stances, both
   // teams in home/away colours, ball at the line of scrimmage).
-  await page.evaluate(() => window.__mlf!.pick(0));
+  await tap(page, pickKey(0));
   await page.waitForTimeout(300);
-  writeFileSync(join(OUT, 'football-presnap.png'), await page.screenshot());
+  writeFileSync(join(screenshotDir, 'football-presnap.png'), await page.screenshot());
 });
 
 test('captures the mid-run screenshot', async ({ page }) => {
   await openField(page);
-  await page.evaluate(() => {
-    window.__mlf!.pick(0);
-    window.__mlf!.snap();
-  });
+  await callAndSnap(page, 0);
   await page.waitForTimeout(700);
-  writeFileSync(join(OUT, 'football-midrun.png'), await page.screenshot());
+  writeFileSync(join(screenshotDir, 'football-midrun.png'), await page.screenshot());
 });
 
 test('captures the pass-in-flight screenshot', async ({ page }) => {
   await openField(page);
-  await page.evaluate(() => {
-    window.__mlf!.pick(2); // Quick Slants (pass)
-    window.__mlf!.snap();
-    window.__mlf!.openWindows();
-  });
+  await callAndSnap(page, 2); // Quick Slants (pass)
+  await page.evaluate(() => window.__mlf!.openWindows());
   await page.waitForTimeout(300);
   await page.evaluate(() => window.__mlf!.throwTo('A'));
   await page.waitForTimeout(150);
   // Distinct filename: `football-pass-hazard.spec.ts` writes `football-pass.png`
   // *after* the banner, so a shared path would let that suite overwrite this
   // genuinely in-flight capture (or vice-versa).
-  writeFileSync(join(OUT, 'football-pass-inflight.png'), await page.screenshot());
+  writeFileSync(join(screenshotDir, 'football-pass-inflight.png'), await page.screenshot());
 });
 
 test('captures the tackle screenshot', async ({ page }) => {
   await openField(page);
-  await page.evaluate(() => {
-    window.__mlf!.pick(0); // run play: carrier meets the defence
-    window.__mlf!.snap();
-  });
+  await callAndSnap(page, 0); // run play: carrier meets the defence
   // Let the run carry into contact — the knockdown/dive states show here.
   await page.waitForTimeout(1200);
-  writeFileSync(join(OUT, 'football-tackle.png'), await page.screenshot());
+  writeFileSync(join(screenshotDir, 'football-tackle.png'), await page.screenshot());
 });
 
 test('captures the touchdown screenshot', async ({ page }) => {
   await openField(page);
-  await page.evaluate(() => {
-    window.__mlf!.pick(0);
-    window.__mlf!.snap();
-    // Relocate the carrier to the far end zone so the run resolves a touchdown.
-    window.__mlf!.forceCarrierTo(112, 26);
-  });
+  await callAndSnap(page, 0);
+  // Relocate the carrier to the far end zone so the run resolves a touchdown.
+  await page.evaluate(() => window.__mlf!.forceCarrierTo(112, 26));
   await page.waitForTimeout(1200);
-  writeFileSync(join(OUT, 'football-touchdown.png'), await page.screenshot());
+  writeFileSync(join(screenshotDir, 'football-touchdown.png'), await page.screenshot());
 });

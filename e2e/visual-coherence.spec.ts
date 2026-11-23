@@ -1,10 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const OUT = join(dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'screenshots');
-mkdirSync(OUT, { recursive: true });
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { screenshotDir } from './screenshot-path';
+import { trackErrors } from './errors';
+import { P1, tap } from './keys';
 
 const mlf = (page: Page): Promise<{ mode: string; bannerKind: string }> =>
   page.evaluate(() => {
@@ -12,31 +11,31 @@ const mlf = (page: Page): Promise<{ mode: string; bannerKind: string }> =>
     return { mode: h?.mode ?? '', bannerKind: h?.bannerKind ?? '' };
   });
 
-/** Call a debug-handle method inside the page (functions cannot cross the wire). */
-const call = (page: Page, fn: 'pick' | 'snap' | 'forceCarrierTo', ...args: number[]) =>
+/** Map a 0-based play card index to the real P1 key that calls it (A/B/C). */
+function pickKey(index: number): string {
+  return ([P1.A, P1.B, P1.C] as const)[index]!;
+}
+
+/** Call a play card then snap the ball, driving real keyboard events. */
+async function callAndSnap(page: Page, index: number): Promise<void> {
+  await tap(page, pickKey(index));
+  await page.waitForTimeout(80);
+  await tap(page, P1.C);
+}
+
+/** Relocate the live carrier to an absolute cell (test seam, not player input). */
+const forceCarrierTo = (page: Page, x: number, y: number) =>
   page.evaluate(
-    ([name, values]) => {
-      type Handle = {
-        pick: (i: number) => void;
-        snap: () => void;
-        forceCarrierTo: (x: number, y: number) => void;
-      };
-      const h = (window as unknown as { __mlf: Handle }).__mlf;
-      if (name === 'pick') h.pick(values[0]!);
-      else if (name === 'snap') h.snap();
-      else h.forceCarrierTo(values[0]!, values[1]!);
+    ([px, py]) => {
+      type Handle = { forceCarrierTo: (x: number, y: number) => void };
+      (window as unknown as { __mlf: Handle }).__mlf.forceCarrierTo(px!, py!);
     },
-    [fn, args] as const,
+    [x, y] as const,
   );
 
 function trackAssets(page: Page): { errors: string[]; loaded: string[] } {
-  const errors: string[] = [];
+  const errors = trackErrors(page);
   const loaded: string[] = [];
-  page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
-  page.on('console', (m) => {
-    if (m.type() === 'error' && !/fonts\.(googleapis|gstatic)|ERR_/.test(m.text()))
-      errors.push(`console: ${m.text()}`);
-  });
   page.on('response', (r) => {
     const u = new URL(r.url());
     if (u.pathname.startsWith('/assets/')) {
@@ -48,7 +47,7 @@ function trackAssets(page: Page): { errors: string[]; loaded: string[] } {
 }
 
 const capture = async (page: Page, name: string): Promise<void> => {
-  writeFileSync(join(OUT, name), await page.screenshot());
+  writeFileSync(join(screenshotDir, name), await page.screenshot());
 };
 
 test('hub: cabinet, roster inspector and shared art/audio board load cleanly', async ({ page }) => {
@@ -95,12 +94,11 @@ test('football: live 2.5D action with passing windows, hazards and scorebug', as
   const { errors, loaded } = trackAssets(page);
   await page.goto('/football/');
   await expect(page.locator('#game canvas')).toBeVisible();
-  await call(page, 'pick', 2); // Quick Slants
-  await call(page, 'snap');
+  await callAndSnap(page, 2); // Quick Slants
   await expect(page.getByTestId('scorebug')).toBeVisible();
-  await page.keyboard.down('KeyC');
+  await page.keyboard.down(P1.C);
   await page.waitForTimeout(80);
-  await page.keyboard.up('KeyC');
+  await page.keyboard.up(P1.C);
   await expect.poll(() => page.evaluate(() => window.__mlf!.mode)).toBe('LIVE');
   await capture(page, 'football-live-action.png');
   expect(loaded.some((p) => p.includes('/sprites/'))).toBe(true);
@@ -111,9 +109,8 @@ test('football: broadcast banner (TOUCHDOWN!)', async ({ page }) => {
   const { errors, loaded } = trackAssets(page);
   await page.goto('/football/');
   await expect(page.locator('#game canvas')).toBeVisible();
-  await call(page, 'pick', 0);
-  await call(page, 'snap');
-  await call(page, 'forceCarrierTo', 112, 26);
+  await callAndSnap(page, 0);
+  await forceCarrierTo(page, 112, 26);
   await expect
     .poll(() => mlf(page).then((h) => h.bannerKind), { timeout: 10_000 })
     .toBe('TOUCHDOWN');

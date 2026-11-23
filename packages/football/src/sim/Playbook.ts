@@ -111,9 +111,9 @@ export const DEFENSE_FORMATIONS: Record<DefenseFormationId, DefenseFormation> = 
     id: 'BONE_CRUSH_4_3',
     name: '4-3 Bone Crush',
     positions: def([
-      [-3, 1],
+      [-4, 1],
       [0, 1],
-      [3, 1],
+      [4, 1],
       [-6, 4],
       [6, 4],
       [-14, 8],
@@ -267,7 +267,7 @@ export const OFFENSE_PLAYS: Record<string, OffensePlay> = Object.fromEntries(
       completion: 0,
       risk: 0.02,
       audibles: ['COFFIN_SWEEP', 'QUICK_SLANTS'],
-      skill: { QB: qb('PITCH', [0, -4]), RB1: run([0, -2], [0, 3], [1, 8]) },
+      skill: { QB: qb('PITCH', [0, -4]), RB1: run([2, -2], [2, 3], [1, 8]) },
     }),
     offensePlay({
       id: 'COFFIN_SWEEP',

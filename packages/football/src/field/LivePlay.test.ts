@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { LIVE_TUNING, LivePlay, type LiveActorSpec, type LivePlayInput } from './LivePlay';
+import { buildLivePlayInput } from './fieldMapper';
+import { GameSession } from '../sim/GameSession';
 
 /** Build a minimalist 14-actor input: 7 offense + 7 defense, carrier = home-RB1. */
 function makeInput(overrides: Partial<LivePlayInput> = {}): LivePlayInput {
@@ -237,5 +239,20 @@ describe('LivePlay determinism', () => {
     expect(LIVE_TUNING.diveYards).toBeCloseTo(3);
     expect(LIVE_TUNING.diveCommitSeconds).toBeCloseTo(0.4);
     expect(LIVE_TUNING.hitStopSeconds).toBeCloseTo(0.06);
+    expect(LIVE_TUNING.snapReactionSeconds).toBeCloseTo(1.2);
+  });
+
+  it('an untouched inside run develops for a believable 2-5 s (no instant tackle)', () => {
+    // Build the real default play (INSIDE_GORE_RUN vs BONE_CRUSH_BASE) and run it
+    // with no directional input. The carrier must gain yards and stay alive for
+    // at least 2 s instead of being swallowed at the snap.
+    const session = new GameSession();
+    const input = buildLivePlayInput(session, 'INSIDE_GORE_RUN', 'BONE_CRUSH_BASE', 0x9e3779b9);
+    const lp = new LivePlay(input);
+    const res = lp.run();
+    expect(res.outcome).toMatchObject({ kind: 'WHISTLE', reason: 'TACKLE' });
+    expect(res.elapsed).toBeGreaterThanOrEqual(2);
+    expect(res.elapsed).toBeLessThanOrEqual(5);
+    expect(res.yards).toBeGreaterThan(0);
   });
 });

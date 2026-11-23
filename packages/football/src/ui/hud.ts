@@ -9,6 +9,7 @@
 import { FACTIONS, type FactionId } from '@monster-league/shared-core';
 import { CARNAGE_LIMIT } from '../sim/Roster';
 import type { NastyKind } from '../sim/Playbook';
+import { NASTY_INFO } from '../sim/DirtyTricks';
 
 /** Serialisable snapshot of everything the broadcast HUD displays. */
 export interface HudState {
@@ -38,19 +39,28 @@ export function formatClock(seconds: number): string {
   return s >= 60 ? `${String(m).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}` : String(s);
 }
 
+/** Format a yardage for display: < 1 yard → "INCHES", else whole yards. */
+export function formatYards(yards: number): string {
+  const clamped = Math.max(0, yards);
+  return clamped < 1 ? 'INCHES' : String(Math.round(clamped));
+}
+
 /**
- * "BALL ON OWN 25" field-position label, relative to the team with the ball
- * (`los` is yards from the offense's own goal line). `possession` is kept for
- * the callers' convenience; the text is identical for either team.
+ * Football field-position label, relative to the team in possession. `los` is
+ * measured from the offense's own goal line (0..100), so OWN 1-49, dead-centre
+ * "50", then OPP 49-1 — never `100 - los` against the wrong end zone.
  */
 export function losLabel(los: number, _possession: 'home' | 'away'): string {
-  if (los < 50) return `BALL ON OWN ${los}`;
-  if (los > 50) return `BALL ON OPP ${100 - los}`;
+  const y = Math.round(los);
+  if (los <= 0) return 'BALL ON OWN GOAL LINE';
+  if (los >= 100) return 'BALL ON OPP GOAL LINE';
+  if (los < 50) return `BALL ON OWN ${y}`;
+  if (los > 50) return `BALL ON OPP ${100 - y}`;
   return 'BALL ON 50';
 }
 
 export function downDistanceLabel(down: number, yardsToGo: number): string {
-  return `${ordinal(down)} & ${yardsToGo}`;
+  return `${ordinal(down)} & ${formatYards(yardsToGo)}`;
 }
 
 function ordinal(n: number): string {
@@ -191,14 +201,26 @@ export function buildHuddleOverlay(opts: {
     cardPanel.append(card);
   }
 
-  // Dirty tricks drawer.
+  // Dirty tricks drawer: display names + charges + the audible combo that calls
+  // each (A -> C opens the nasty menu; A/B/C picks its slot, per `nastyMenu`).
   const drawer = el('div', 'gsn-huddle__drawer');
   drawer.setAttribute('data-testid', 'nasty-drawer');
-  const active = opts.availableNasties.length ? opts.availableNasties.join(' · ') : 'no charges';
-  drawer.append(
-    el('span', 'gsn-huddle__drawer-label', 'DIRTY TRICKS'),
-    el('span', undefined, active),
-  );
+  drawer.append(el('span', 'gsn-huddle__drawer-label', 'DIRTY TRICKS'));
+  if (opts.availableNasties.length === 0) {
+    drawer.append(el('span', undefined, 'no charges'));
+  } else {
+    // One charge per Nasty per half: every remaining Nasty carries exactly one.
+    const count = opts.availableNasties.length;
+    const list = el('span', 'gsn-huddle__drawer-list');
+    for (const [i, kind] of opts.availableNasties.entries()) {
+      const slotLetter = (['A', 'B', 'C'] as const)[i % 3]!;
+      const entry = el('span', 'gsn-huddle__drawer-item');
+      entry.setAttribute('data-nasty', kind);
+      entry.textContent = `${NASTY_INFO[kind].name} · [A→C → ${slotLetter}]`;
+      list.append(entry);
+    }
+    drawer.append(list, el('span', undefined, `${count} charge${count === 1 ? '' : 's'}`));
+  }
 
   overlay.append(formPanel, cardPanel, drawer);
   return overlay;
@@ -282,17 +304,20 @@ export function buildControlsBar(context: ControlContext): HTMLElement {
 }
 
 function legendFor(context: ControlContext): string {
+  // Keyboard labels mirror the shared-core InputManager P1 map (A=J/Space, B=K,
+  // C=L, Start=P, movement WASD); gamepad uses the standard South/East/West face
+  // buttons for A/B/C. Show the real keys so the prompt matches what actually works.
   switch (context) {
     case 'HUDDLE':
-      return 'Huddle: [A]/[B]/[C] Call Play · [C] Nasty Drawer';
+      return 'Huddle: [A=J]/[B=K]/[C=L] Call Play · [C=L] Nasty Drawer';
     case 'PRE_SNAP':
-      return 'Pre-Snap: [A] Audible · [B] Shift · [C] Hike';
+      return 'Pre-Snap: [A=J] Audible · [B=K] Shift · [C=L] Hike';
     case 'PASSING':
-      return 'Passing: [A]/[B]/[C] Throw · arrows lead receiver';
+      return 'Passing: [A=J]/[B=K]/[C=L] Throw · WASD lead receiver';
     case 'CARRIER':
-      return 'Ball Carrier: arrows run · [A] Dive · [C] Turbo';
+      return 'Ball Carrier: WASD run · [A=J] Dive · [C=L] Turbo';
     case 'DEFENSE':
-      return 'Defense: arrows pursue · [B] Switch defender';
+      return 'Defense: WASD pursue · [B=K] Switch defender';
   }
 }
 

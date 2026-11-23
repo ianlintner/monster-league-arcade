@@ -4,6 +4,8 @@ coverage/
 playwright-report/
 test-results/
 .worktrees/
+# live-deploy E2E captures (docs/screenshots/live/) are artifacts, not source
+docs/screenshots/live/
 .env
 .env.*
 !.env.example

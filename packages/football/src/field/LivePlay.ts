@@ -150,6 +150,12 @@ export const LIVE_TUNING = {
   tackleRadius: 1.1,
   /** Blocking contact distance (yards) that engages a defender. */
   blockRadius: 1.5,
+  /**
+   * Post-snap read window: defenders hold their initial spot for this long before
+   * pursuing, so an untouched run play develops for a believable 2-5 s instead of
+   * being swallowed by a full-speed rush the instant the ball is snapped.
+   */
+  snapReactionSeconds: 1.2,
   /** Fixed timestep. */
   dt: 1 / 60,
 } as const;
@@ -433,10 +439,13 @@ export class LivePlay {
       // receivers). Defense pursues the carrier's actual position.
       const dirX = a.side === 'DEFENSE' ? carrier.x - a.x : routeDir ? routeDir.x : 2;
       const dirY = a.side === 'DEFENSE' ? carrier.y - a.y : routeDir ? routeDir.y : 0;
-      const engagedDamp = a.engaged ? 0.1 : 1; // engaged defenders crawl, not run
+      const engagedDamp = a.engaged ? 0 : 1; // engaged defenders are blocked, not crawling
+      // Post-snap read: defenders hold their spot for the reaction window so an
+      // untouched run play develops instead of being swallowed at the snap.
+      const reacting = a.side === 'DEFENSE' && this.t < LIVE_TUNING.snapReactionSeconds;
       const m = Math.hypot(dirX, dirY) || 1;
-      const desiredVx = (dirX / m) * spec.topSpeed * engagedDamp;
-      const desiredVy = (dirY / m) * spec.topSpeed * engagedDamp;
+      const desiredVx = reacting ? 0 : (dirX / m) * spec.topSpeed * engagedDamp;
+      const desiredVy = reacting ? 0 : (dirY / m) * spec.topSpeed * engagedDamp;
       const k = 1 - Math.exp(-LIVE_TUNING.dt / LIVE_TUNING.accelTimeSeconds);
       a.vx += (desiredVx - a.vx) * k;
       a.vy += (desiredVy - a.vy) * k;
