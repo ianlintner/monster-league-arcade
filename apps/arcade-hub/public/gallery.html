@@ -161,7 +161,7 @@
           lbl.className = 'lbl';
           lbl.textContent = `${label} (${side})`;
           card.appendChild(lbl);
-          const src = `/assets/sprites/${id}${suffix}.png`;
+          const src = `assets/sprites/${id}${suffix}.png`;
           // idle (row 0, 4 frames), SE run (row 2, 6 frames), death (row 12, 6 frames)
           for (const [row, name, frames] of [
             [0, 'idle', 4],
@@ -208,11 +208,11 @@
         ['necro_ref', 'Necro ref'],
         ['demon_ref', 'Demon ref'],
         ['crypt_announcer', 'Announcer'],
-      ].forEach(([id, l]) => imgCard(pRow, `/assets/portraits/${id}.png`, l, 4));
+      ].forEach(([id, l]) => imgCard(pRow, `assets/portraits/${id}.png`, l, 4));
 
       const cRow = document.getElementById('crest-row');
       factions.forEach(([id, l]) =>
-        imgCard(cRow, `/assets/sprites/crest_${id}.png`, `${l} crest`, 4),
+        imgCard(cRow, `assets/sprites/crest_${id}.png`, `${l} crest`, 4),
       );
 
       const tRow = document.getElementById('turf-row');
@@ -220,7 +220,7 @@
         ['cursed_graveyard', 'Graveyard'],
         ['brimstone_hellfire_pit', 'Hellfire pit'],
         ['ectoplasm_swamp', 'Swamp'],
-      ].forEach(([id, l]) => imgCard(tRow, `/assets/arenas/${id}_turf.png`, `${l} turf`, 4));
+      ].forEach(([id, l]) => imgCard(tRow, `assets/arenas/${id}_turf.png`, `${l} turf`, 4));
 
       // Initial settle check: if tracking began after all loads already finished
       // (unlikely), still resolve.

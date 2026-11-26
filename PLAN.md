@@ -155,8 +155,8 @@ We implement a clean-room mechanical homage based on documented 1993 Genesis mec
     - `/` — Retro-modern **Monster League Arcade Cabinet Hub** (select Football or Hockey, inspect the 4 Monster Factions & star rosters, test audio/CRT settings, view controls).
     - `/football/` — *Halloween Monster League Football*.
     - `/hockey/` — *Monster League Hockey* preview mode.
-- **Azure Static Web Apps (`staticwebapp.config.json`)**:
-  - Single Azure Static Web App resource (`monster-league-arcade`, Free SKU) serving the unified `dist/` artifact with clean sub-path routing (`/football/*`, `/hockey/*`), immutable asset caching, and security headers.
+- **Hosting (Cat Herding Games hub)**:
+  - Served at `https://games.cat-herding.net/monster-league-arcade/` from the hub's shared Azure Static Web App; the hub builds this repo with `--base=/monster-league-arcade/` (this repo no longer deploys its own SWA).
 
 ---
 

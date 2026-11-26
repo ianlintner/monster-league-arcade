@@ -3,7 +3,7 @@ name: verify-production
 on:
   schedule:
     # Daily at 07:30 UTC — cheap read-only verification of the live production
-    # deployment (routes, security headers and asset sha256 parity against a
+    # deployment on the Cat Herding Games hub (routes, security headers and asset sha256 parity against a
     # freshly built dist/). No repository secrets are required.
     - cron: '30 7 * * *'
   workflow_dispatch:
@@ -18,8 +18,9 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run build
+      # Same build the Cat Herding Games hub produces (--base=/<slug>/), so sha256 parity holds.
+      - run: npm run build -w @monster-league/arcade-hub -- --base=/monster-league-arcade/
       - name: Verify production deployment
         env:
-          PROD_URL: https://gray-sky-061388210.6.azurestaticapps.net
+          PROD_URL: https://games.cat-herding.net/monster-league-arcade/
         run: node scripts/verify-deployment.mjs "$PROD_URL"

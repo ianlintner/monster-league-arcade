@@ -3,7 +3,7 @@
  * Verify a deployed build over HTTP: status, security headers, and asset
  * sha256 equality against the local dist/ artifact.
  *
- *   node scripts/verify-deployment.mjs https://<swa-host>
+ *   node scripts/verify-deployment.mjs https://<host>/<base-path>
  */
 import { createHash } from 'node:crypto';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
@@ -14,7 +14,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = join(ROOT, 'dist');
 const base = (process.argv[2] ?? '').replace(/\/$/, '');
 if (!/^https?:\/\//.test(base)) {
-  console.error('usage: node scripts/verify-deployment.mjs <https://swa-host>');
+  console.error('usage: node scripts/verify-deployment.mjs <https://host/base-path>');
   process.exit(2);
 }
 
@@ -38,7 +38,9 @@ const htmlFiles = ['index.html', 'football/index.html', 'hockey/index.html'];
 const assetPaths = new Set();
 for (const f of htmlFiles) {
   const html = readFileSync(join(DIST, f), 'utf8');
-  for (const m of html.matchAll(/(?:src|href)="(\/assets\/[^"?#]+\.(?:js|css))"/g))
+  // Built HTML references assets under the build base (e.g. /monster-league-arcade/assets/x.js);
+  // normalise to the dist-relative `/assets/...` path so it maps to both dist/ and <base>/assets/.
+  for (const m of html.matchAll(/(?:src|href)="[^"]*?(\/assets\/[^"?#]+\.(?:js|css))"/g))
     assetPaths.add(m[1]);
 }
 const walk = (dir, prefix = '') => {

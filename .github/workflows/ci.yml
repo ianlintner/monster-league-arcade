@@ -16,3 +16,5 @@ jobs:
       - run: npm run check
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test
+      # Hub hosting builds with --base=/monster-league-arcade/; fail on any root-absolute URL.
+      - run: npx playwright test --config playwright.subpath.config.ts
