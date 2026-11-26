@@ -21,6 +21,8 @@ import { GameSession, type Slot } from '../sim/index';
 import { buildLivePlayInput, projectActor } from '../field/fieldMapper';
 import { drawFieldSprites, drawField, drawHazards, hazardStateKey } from './fieldRenderer';
 import type { DrawSurface } from './fieldRenderer';
+import { stepCamera, clampFocus, INITIAL_CAMERA } from './cameraRig';
+import type { CameraState } from './cameraRig';
 import { LivePlay, type LiveActorState, type LivePlayResult } from '../field/LivePlay';
 import { HazardManager } from '../field/HazardManager';
 import { resolvePassAttempt, resolveScrambleOutcome } from '../field/PlayOrchestrator';
@@ -222,11 +224,9 @@ export class MatchScene extends Phaser.Scene {
   private lastSlow = 1;
 
   /** Presentation camera: frames a ~37-yard window around the ball and zooms out
-   *  smoothly for deep passes and kicks. `camX`/`camY` are the world-space focus
-   *  point (screen space, pre-zoom); `camZoom` is the current render zoom. */
-  private camX = CANVAS_WIDTH / 2;
-  private camY = -20;
-  private camZoom = 2.2;
+   *  smoothly for deep passes and kicks. Focus/zoom math + arena clamp live in
+   *  `cameraRig`; this holds only the owned `CameraState` between frames. */
+  private camera: CameraState = { ...INITIAL_CAMERA };
 
   /** Ball in flight (pass animation) — null when no ball is airborne. */
   private ballFlight: {
@@ -435,57 +435,20 @@ export class MatchScene extends Phaser.Scene {
    *  zoom + scroll on `cameras.main` so every world object (turf, lines, actors,
    *  overlays) transforms together without a per-projection rewrite. */
   private updateCamera(dt: number): void {
-    let tx = CANVAS_WIDTH / 2;
-    let ty = CANVAS_HEIGHT * 0.45;
-    let targetZoom = 2.2;
-
-    // Focus on the ball: the carrier in the huddle/pre-snap/live, the flight path
-    // midpoint while airborne, or the LOS otherwise.
-    const carrier = this.live?.carrier;
-    if (this.ballFlight) {
-      const from = projectToScreen(this.ballFlight.fromX, this.ballFlight.fromY);
-      const to = projectToScreen(this.ballFlight.toX, this.ballFlight.toY);
-      tx = (from.x + to.x) / 2;
-      ty = (from.y + to.y) / 2 - 24;
-      targetZoom = 1.35; // wide enough to keep both the QB and the target visible
-    } else if (carrier) {
-      const f = projectActor(carrier.x, carrier.y, this.liveLos);
-      const s = projectToScreen(f.x, f.y);
-      tx = s.x;
-      ty = s.y - 6;
-      // Deep pass: the QB drops back and throws; widen the window pre-throw.
-      targetZoom = this.isPassPlay ? 1.6 : 2.2;
-    }
-
-    // Smooth-lerp the focus and zoom so the camera glides rather than snaps.
-    const k = 1 - Math.exp(-dt * 6);
-    this.camX += (tx - this.camX) * k;
-    this.camY += (ty - this.camY) * k;
-    this.camZoom += (targetZoom - this.camZoom) * (1 - Math.exp(-dt * 3));
+    this.camera = stepCamera(this.camera, {
+      dt,
+      ballFlight: this.ballFlight,
+      carrier: this.live?.carrier ?? null,
+      los: this.liveLos,
+      isPassPlay: this.isPassPlay,
+    });
 
     const cam = this.cameras.main;
-    cam.setZoom(this.camZoom);
-    cam.centerOn(this.camX, this.camY);
-    // Clamp the camera to the arena so the view never pans into the VOID_BLACK
-    // surround at the end zones / sidelines. The field projects to the full
-    // 640×360 canvas, so at zoom > 1 the visible world area shrinks and the centre
-    // must stay inset by half the visible width/height to keep the viewport on
-    // turf. Zoom < 1 (never used) or a viewport wider/taller than the arena is
-    // guarded below.
-    const halfW = CANVAS_WIDTH / (2 * this.camZoom);
-    const halfH = CANVAS_HEIGHT / (2 * this.camZoom);
-    if (2 * halfW >= CANVAS_WIDTH) {
-      cam.centerOn(CANVAS_WIDTH / 2, Math.max(0, Math.min(CANVAS_HEIGHT, this.camY)));
-      return;
-    }
-    if (2 * halfH >= CANVAS_HEIGHT) {
-      cam.centerOn(this.camX, CANVAS_HEIGHT / 2);
-      return;
-    }
-    cam.centerOn(
-      Math.max(halfW, Math.min(CANVAS_WIDTH - halfW, this.camX)),
-      Math.max(halfH, Math.min(CANVAS_HEIGHT - halfH, this.camY)),
-    );
+    cam.setZoom(this.camera.zoom);
+    // Clamp the focus to the arena so the view never pans into the VOID_BLACK
+    // surround at the end zones / sidelines (see cameraRig.clampFocus).
+    const focus = clampFocus(this.camera);
+    cam.centerOn(focus.x, focus.y);
   }
 
   // ------------------------------------------------------------- inputs
@@ -1875,7 +1838,7 @@ export class MatchScene extends Phaser.Scene {
     const hazardManager = () => this.hazardManager;
     const spriteBackedActors = () => this.spriteBackedActorCount;
     const carrierScreen = () => this.carrierScreen;
-    const camZoom = () => this.camZoom;
+    const camZoom = () => this.camera.zoom;
     const bannerKind = () => this.bannerKind;
     const aiDecision = () => {
       // Debug probe only: "what would the AI coach call for the team currently in
