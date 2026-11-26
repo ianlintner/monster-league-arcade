@@ -122,8 +122,7 @@ export function installDebugHandle(s: DebugHandleSurface): void {
     },
     get actors() {
       return (
-        live()?.actors.map((a) => ({ id: a.id, side: a.side, slot: a.slot, x: a.x, y: a.y })) ??
-        []
+        live()?.actors.map((a) => ({ id: a.id, side: a.side, slot: a.slot, x: a.x, y: a.y })) ?? []
       );
     },
     // Count of sprite-backed actors rendered last frame (14 field players +

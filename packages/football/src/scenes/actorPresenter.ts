@@ -17,7 +17,11 @@
  * public entry points `renderActors()` / `renderOverlays(dt)` mirror the original
  * `drawActors()` / `drawOverlays(dt)` call sites in `update()`.
  */
-import { HALLOWEEN_MIDNIGHT_PALETTE as P, projectToScreen, toPhaserColor } from '@monster-league/shared-core';
+import {
+  HALLOWEEN_MIDNIGHT_PALETTE as P,
+  projectToScreen,
+  toPhaserColor,
+} from '@monster-league/shared-core';
 import type * as Phaser from 'phaser';
 import { projectActor } from '../field/fieldMapper';
 import { meterValue, KICK_METER } from '../field/KickMeter';
@@ -82,8 +86,13 @@ export interface PresentScene {
   kickHoldMs: number;
   kickLocked: number | null;
   ballFlight: {
-    fromX: number; fromY: number; toX: number; toY: number;
-    t: number; dur: number; style: 'LOB' | 'BULLET';
+    fromX: number;
+    fromY: number;
+    toX: number;
+    toY: number;
+    t: number;
+    dur: number;
+    style: 'LOB' | 'BULLET';
   } | null;
   // -- presentation maps shared with the sim block (read/write where noted) ----
   runDist: Map<string, number>;
@@ -347,7 +356,15 @@ export class ActorPresenter {
       const windupHoldsBall =
         (cell.animation === 'pass_aim' && cell.col < 3) ||
         (cell.animation === 'pass_aim_throw' && cell.col < 3);
-      this.drawCarriedBall(scene, a.px, a.py - 12 * a.scale, a.py, a.scale, a.depth, windupHoldsBall);
+      this.drawCarriedBall(
+        scene,
+        a.px,
+        a.py - 12 * a.scale,
+        a.py,
+        a.scale,
+        a.depth,
+        windupHoldsBall,
+      );
     }
     return 1;
   }

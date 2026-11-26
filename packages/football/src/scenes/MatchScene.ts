@@ -10,14 +10,9 @@
  * plays on A/B/C. `window.__mlf` exposes the session + phase for e2e/Playwright.
  */
 import * as Phaser from 'phaser';
-import {
-  HALLOWEEN_MIDNIGHT_PALETTE as P,
-  projectToScreen,
-  toPhaserColor,
-} from '@monster-league/shared-core';
+import { HALLOWEEN_MIDNIGHT_PALETTE as P } from '@monster-league/shared-core';
 import { InputManager, type InputSnapshot, type ArcadeButton } from '@monster-league/shared-core';
-import { GameSession, type Slot } from '../sim/index';
-import { buildLivePlayInput, projectActor } from '../field/fieldMapper';
+import { GameSession } from '../sim/index';
 import { drawFieldSprites, drawField, drawHazards, hazardStateKey } from './fieldRenderer';
 import type { DrawSurface } from './fieldRenderer';
 import { stepCamera, clampFocus, INITIAL_CAMERA } from './cameraRig';
@@ -29,18 +24,11 @@ import {
   syncHud,
   syncHuddle,
 } from './hudBridge';
-import { LivePlay, type LiveActorState, type LivePlayResult } from '../field/LivePlay';
+import type { LivePlay, LivePlayResult } from '../field/LivePlay';
 import { HazardManager } from '../field/HazardManager';
-import { resolvePassAttempt, resolveScrambleOutcome } from '../field/PlayOrchestrator';
-import { styleForHold } from '../field/Ballistics';
-import { NastyFieldEffects } from '../field/NastyFieldEffects';
-import { resolveKick, meterValue } from '../field/KickMeter';
+import type { NastyFieldEffects } from '../field/NastyFieldEffects';
 import type { HazardHit } from '../sim/GameSession';
-import {
-  bannerKindForText,
-  buildBroadcastBanner,
-  type BannerKind,
-} from '../ui/hud';
+import type { BannerKind } from '../ui/hud';
 import {
   FACTION_SHEET,
   REF_SHEET_NECRO,
@@ -50,79 +38,35 @@ import {
   type ActorPresentationState,
 } from './spriteRenderer';
 import { ActorPresenter, type PresentScene } from './actorPresenter';
-import {
-  installDebugHandle,
-  type DebugHandleSurface,
-} from './debugHandle';
+import { installDebugHandle, type DebugHandleSurface } from './debugHandle';
+import { MatchController } from './matchController';
 
 export const CANVAS_WIDTH = 640;
 export const CANVAS_HEIGHT = 360;
-
-type PlayKind = 'RUN' | 'PASS' | 'PUNT' | 'FIELD_GOAL';
-
-/** Three human-selectable plays (A/B/C) — two runs and one pass. */
-const PLAY_CATALOG: ReadonlyArray<{ id: string; label: string; kind: PlayKind }> = [
-  { id: 'INSIDE_GORE_RUN', label: 'Inside Gore Run', kind: 'RUN' },
-  { id: 'COFFIN_SWEEP', label: 'Coffin Sweep', kind: 'RUN' },
-  { id: 'QUICK_SLANTS', label: 'Quick Slants (Pass)', kind: 'PASS' },
-];
-/**
- * On 4th down the play call swaps to special teams: punt, field goal, or a
- * desperation run ("go for it"). This is what makes the KickMeter reachable —
- * the punter/kicker face the C-button timing meter instead of a live play.
- */
-const FOURTH_DOWN_CATALOG: ReadonlyArray<{ id: string; label: string; kind: PlayKind }> = [
-  { id: 'PUNT', label: 'Punt', kind: 'PUNT' },
-  { id: 'FIELD_GOAL', label: 'Field Goal', kind: 'FIELD_GOAL' },
-  { id: 'INSIDE_GORE_RUN', label: 'Go For It (Run)', kind: 'RUN' },
-];
-const DEFAULT_DEFENSE = 'BONE_CRUSH_BASE';
-
-/** Banner body line for a classified broadcast banner. */
-function detailForKind(kind: BannerKind, raw: string): string {
-  switch (kind) {
-    case 'TOUCHDOWN':
-    case 'TURNOVER':
-    case 'FUMBLE':
-    case 'PENALTY':
-    case 'REF_LIQUIDATED':
-      return raw;
-    case 'NASTY':
-      return 'A dirty trick is in play.';
-    case 'FORFEIT':
-      return raw.replace(/^FORFEIT BY CARNAGE[!]?\s*/, '');
-    case 'CASUALTY':
-      return raw;
-    case 'NEUTRAL':
-      return raw;
-  }
-}
-
-/** The play list in play for the current down (4th down → special teams). */
-function catalogForDown(
-  down: number,
-): ReadonlyArray<{ id: string; label: string; kind: PlayKind }> {
-  return down >= 4 ? FOURTH_DOWN_CATALOG : PLAY_CATALOG;
-}
 
 export class MatchScene extends Phaser.Scene {
   /** Set by `bootFootball(_, { production: true })` from the app entry; gates the
    *  on-canvas instruction/debug text overlay (game state lives in the HUD). */
   static isProduction = false;
 
-  private session!: GameSession;
-  private live: LivePlay | null = null;
-  private liveResult: LivePlayResult | null = null;
+  /** The live-play mode state machine + sim loop, extracted to `matchController`.
+   *  It owns no state: it reads/writes this scene through the `MatchRuntime`
+   *  surface. Constructed lazily because it holds a back-reference to `this`. */
+  private match!: MatchController;
+
+  session!: GameSession;
+  live: LivePlay | null = null;
+  liveResult: LivePlayResult | null = null;
 
   /** Presentation state machine layered over `GameSession`'s own phases. */
-  private mode: 'PICK' | 'PRE_SNAP' | 'LIVE' | 'BANNER' = 'PICK';
-  private selectedPlayIndex = 0;
-  private bannerText = '';
-  private bannerKind: BannerKind = 'NEUTRAL';
-  private bannerTimer = 0;
+  mode: 'PICK' | 'PRE_SNAP' | 'LIVE' | 'BANNER' = 'PICK';
+  selectedPlayIndex = 0;
+  bannerText = '';
+  bannerKind: BannerKind = 'NEUTRAL';
+  bannerTimer = 0;
   /** Set once the session reaches GAME_OVER; disables play selection + dismiss. */
-  private gameOver = false;
-  private highlightDefender = -1;
+  gameOver = false;
+  highlightDefender = -1;
   private inputPollTimer = 0;
   /** Fingerprint of the last huddle overlay build; skips redundant DOM rebuilds. */
   private huddleFingerprint = '';
@@ -137,21 +81,21 @@ export class MatchScene extends Phaser.Scene {
   private homeSheet = '';
   private awaySheet = '';
   /** Per-actor accumulated distance travelled (run frames advance on it). */
-  private runDist = new Map<string, number>();
+  runDist = new Map<string, number>();
   /** Previous fixed-step position per actor, for distance-based frame advance. */
-  private lastPos = new Map<string, { x: number; y: number }>();
+  lastPos = new Map<string, { x: number; y: number }>();
   /** Per-actor seconds since its *current* animation began (one-shots/loops). */
-  private animClock = new Map<string, number>();
+  animClock = new Map<string, number>();
   /** Per-actor current animation (to detect transitions and restart the clock). */
-  private animKind = new Map<string, ActorAnimation>();
+  animKind = new Map<string, ActorAnimation>();
   /** Scene-side terminal status per actor id (death/knockdown/celebration). */
-  private presentation = new Map<string, ActorPresentationState>();
+  presentation = new Map<string, ActorPresentationState>();
   /** Frame-by-frame actor/overlay rendering extracted to a presenter (owns no
    *  state; it draws through the scene surface below). */
   private actorPresenter = new ActorPresenter();
   /** The first-down target field-x captured at snap (survives `snap()` mutating
    *  `session.yardsToGo` during the banner). */
-  private firstDownFieldX = 0;
+  firstDownFieldX = 0;
   /** Count of sprite-backed actors (14 + referee) rendered last frame. */
   private spriteBackedActorCount = 0;
   /** Last-drawn carrier's projected screen-space position and depth scale, cached
@@ -165,56 +109,56 @@ export class MatchScene extends Phaser.Scene {
   private hazardStateKey = '';
 
   /** Hazard terrain for the arena, evaluated every live tick. */
-  private hazardManager!: HazardManager;
+  hazardManager!: HazardManager;
   /** Nasty audible on-field effects (boost, grenades, gas, hex, shroud). */
-  private nastyFields!: NastyFieldEffects;
+  nastyFields!: NastyFieldEffects;
   /** The latest nasty-field snapshot, refreshed each fixed step; consumed by
    *  movement, input inversion and the overlays (gas cloud, shroud, kill-ref). */
-  private nastySnap: ReturnType<NastyFieldEffects['tick']> | null = null;
+  nastySnap: ReturnType<NastyFieldEffects['tick']> | null = null;
   /** Elapsed live-down seconds, fed to NastyFieldEffects (hex/gas/shroud timers). */
-  private liveElapsed = 0;
+  liveElapsed = 0;
   /** Wall-clock seconds since the last render frame (uncapped `update` delta, in
    *  contrast to `LIVE_TUNING.dt`'s fixed sim step); drives animation clocks so a
    *  run cycle advances by real time rather than once per rendered frame. */
   private renderDt = 0;
   /** Ghoul Gas cloud marker (field coords + expiry) for the render dim. */
-  private gasCloud: { x: number; y: number; until: number } | null = null;
+  gasCloud: { x: number; y: number; until: number } | null = null;
   /** Hazard hits accumulated over the current live down, committed at whistle. */
-  private pendingHazardHits: HazardHit[] = [];
+  pendingHazardHits: HazardHit[] = [];
   /** The LOS at snap, captured when the live down begins. Live actor positions are
    *  relative to *this* LOS, but `session.snap()` mutates `session.los` before the
    *  banner frames draw, so all actor/overlay projections must use the unchanged
    *  starting LOS rather than the already-advanced one (else the formation shifts
    *  again by the gained yardage, or across the field after a turnover). */
-  private liveLos = 0;
+  liveLos = 0;
   /** Whether the current live play is a pass (QB drops back, A/B/C = receivers). */
-  private isPassPlay = false;
+  isPassPlay = false;
   /** Whether the current play is a punt / field-goal attempt (C = kick meter). */
-  private isKickPlay = false;
+  isKickPlay = false;
   /** Hold time on C during a kick play → meter sweep position. */
-  private kickHoldMs = 0;
+  kickHoldMs = 0;
   /** Locked meter value (0..1) once the kicker taps C. */
-  private kickLocked: number | null = null;
+  kickLocked: number | null = null;
   /** True once the kick has been resolved and committed via snap. */
-  private kickCommitted = false;
+  kickCommitted = false;
   /** Hold time for the current pass (ms) → lob vs bullet throw style. */
-  private passHoldMs = 0;
+  passHoldMs = 0;
   /** Which receiver button (A/B) is currently held pending a release throw. */
-  private heldThrowKey: 'A' | 'B' | null = null;
+  heldThrowKey: 'A' | 'B' | null = null;
   /** Whether the receiving windows are open (C toggles them behind the LOS). */
-  private windowsOpen = false;
+  windowsOpen = false;
   /** True from the C press that opened the windows until a *fresh* C keydown, so
    *  that very same press never doubles as a throw to receiver C (the player must be
    *  able to choose A or B, or re-press C deliberately, after opening). */
-  private windowOpenPressConsumed = false;
+  windowOpenPressConsumed = false;
   /** Deterministic check used to trigger the first hazard for the e2e path. */
-  private hazardArmedForDemo = true;
+  hazardArmedForDemo = true;
   /** Accumulates render time toward fixed 60 Hz sim steps (real-time pacing). */
-  private simAccumulator = 0;
+  simAccumulator = 0;
   /** Last terrain friction/slow from the hazard evaluator, applied to the carrier
    *  movement on the next fixed step (graveyard tombstones impede, swamp slows). */
-  private lastFriction = 1;
-  private lastSlow = 1;
+  lastFriction = 1;
+  lastSlow = 1;
 
   /** Presentation camera: frames a ~37-yard window around the ball and zooms out
    *  smoothly for deep passes and kicks. Focus/zoom math + arena clamp live in
@@ -222,7 +166,7 @@ export class MatchScene extends Phaser.Scene {
   private camera: CameraState = { ...INITIAL_CAMERA };
 
   /** Ball in flight (pass animation) — null when no ball is airborne. */
-  private ballFlight: {
+  ballFlight: {
     fromX: number;
     fromY: number;
     toX: number;
@@ -238,24 +182,24 @@ export class MatchScene extends Phaser.Scene {
    *  Set on `commitPass`; the release frames (row 9, 0..3) play once while the ball
    *  is airborne, then resolve back to idle/run. This separates *aiming* (a cocked
    *  hold while the windows are open) from *throwing* (the release on launch). */
-  private passingUntil = -1;
+  passingUntil = -1;
 
   /** Floating damage numbers + casualty/death animations, cleared per down. */
-  private damagePopups: { x: number; y: number; text: string; color: number; ttl: number }[] = [];
-  private casualties: { id: string; x: number; y: number; ttl: number }[] = [];
+  damagePopups: { x: number; y: number; text: string; color: number; ttl: number }[] = [];
+  casualties: { id: string; x: number; y: number; ttl: number }[] = [];
 
-  private looseBall: { x: number; y: number; ttl: number } | null = null;
+  looseBall: { x: number; y: number; ttl: number } | null = null;
   /** Which actor *presentationally* holds the ball right now (actor id, not the
    *  roster id). `LivePlay.carrier` stays the QB through a whole pass play, so the
    *  carried-ball sprite must track possession independently: null while the ball
    *  is in flight or loose, the receiver on a completion, null on a pick/incomplete. */
-  private ballHolderId: string | null = null;
+  ballHolderId: string | null = null;
 
   /** Unified Genesis 3-button + 360° input (keyboard/gamepad/touch). All game
    *  input flows through this one source of truth — no raw Phaser key polling. */
   private inputManager = new InputManager();
   /** Latest polled snapshot for the human player (P1, slot 0). */
-  private playerInput: InputSnapshot = {
+  playerInput: InputSnapshot = {
     x: 0,
     y: 0,
     buttons: { A: false, B: false, C: false, START: false },
@@ -266,6 +210,9 @@ export class MatchScene extends Phaser.Scene {
 
   constructor() {
     super('match');
+    // The controller holds a back-reference to this scene through `MatchRuntime`;
+    // construct it before exposing the debug handle (which drives the same surface).
+    this.match = new MatchController(this);
     // Expose the e2e/dev handle as soon as the scene object exists, not in
     // `create()`: Phaser makes the canvas visible at the *start* of `preload`,
     // so gameplay specs that read `window.__mlf` right after the canvas appears
@@ -391,30 +338,17 @@ export class MatchScene extends Phaser.Scene {
       // the pick so the down proceeds.
       if (penalty?.kind === 'DELAY_OF_GAME') {
         if (this.mode === 'PICK') {
-          this.confirmPlay(this.selectedPlayIndex);
+          this.match.confirmPlay(this.selectedPlayIndex);
         } else if (this.mode === 'PRE_SNAP') {
           // The penalty moved `session.los` back 5 yards, but the formation was
           // built at pick time from the old LOS. Rebuild it so the actors, ball
           // and first-down line sit at the penalised spot instead of the stale one.
-          this.prepareLivePlay();
+          this.match.prepareLivePlay();
         }
       }
     }
 
-    switch (this.mode) {
-      case 'PICK':
-        this.updatePick();
-        break;
-      case 'PRE_SNAP':
-        this.updatePreSnap();
-        break;
-      case 'LIVE':
-        this.updateLive(dt);
-        break;
-      case 'BANNER':
-        this.updateBanner(dt);
-        break;
-    }
+    this.match.updateMode(dt);
     const actors = this.actorPresenter.renderActors(this.renderContext());
     this.spriteBackedActorCount = actors.spriteBackedActorCount;
     this.carrierScreen = actors.carrierScreen;
@@ -487,732 +421,28 @@ export class MatchScene extends Phaser.Scene {
   }
 
   /** Button held this poll (level, for steering/turbo/hold-to-throw). */
-  private buttonHeld(b: ArcadeButton): boolean {
+  buttonHeld(b: ArcadeButton): boolean {
     return this.playerInput.buttons[b];
   }
   /** Button freshly pressed this poll (edge — a tap, consumed exactly once). */
-  private pressedBtn(b: ArcadeButton): boolean {
+  pressedBtn(b: ArcadeButton): boolean {
     return this.playerInput.pressed[b];
   }
   /** Button released this poll (level true → false, for hold-to-throw/kick lock). */
-  private releasedBtn(b: ArcadeButton): boolean {
+  releasedBtn(b: ArcadeButton): boolean {
     return this.prevInput.buttons[b] && !this.playerInput.buttons[b];
   }
 
-  private confirmPlay(index: number): void {
-    this.selectedPlayIndex = index;
-    this.session.selectPlays(catalogForDown(this.session.down)[index]!.id, DEFAULT_DEFENSE);
-    this.mode = 'PRE_SNAP';
-    // Build the live play at pick time so the PRE_SNAP formation renders its
-    // 14 actors in idle stances (both teams in home/away colours, ball at the
-    // line of scrimmage). The down's sim clock does not start until `snap()`.
-    this.prepareLivePlay();
-  }
-
-  private updatePick(): void {
-    if (this.gameOver) return;
-    // The pick list depends on the down: 4th down offers special teams (punt/FG).
-    const catalog = catalogForDown(this.session.down);
-    if (this.pressedBtn('A')) this.selectedPlayIndex = 0;
-    else if (this.pressedBtn('B')) this.selectedPlayIndex = 1;
-    else if (this.pressedBtn('C')) this.selectedPlayIndex = 2;
-    else if (this.steerLeftEdge())
-      this.selectedPlayIndex = (this.selectedPlayIndex + catalog.length - 1) % catalog.length;
-    else if (this.steerRightEdge())
-      this.selectedPlayIndex = (this.selectedPlayIndex + 1) % catalog.length;
-    else return;
-    this.confirmPlay(this.selectedPlayIndex);
-  }
-
   /** D-pad/stick left as a fresh edge (analog level crossing -0.5 from above). */
-  private steerLeftEdge(): boolean {
+  steerLeftEdge(): boolean {
     return this.prevInput.x > -0.5 && this.playerInput.x <= -0.5;
   }
   /** D-pad/stick right as a fresh edge. */
-  private steerRightEdge(): boolean {
+  steerRightEdge(): boolean {
     return this.prevInput.x < 0.5 && this.playerInput.x >= 0.5;
   }
 
-  private updatePreSnap(): void {
-    if (this.pressedBtn('C')) this.beginLivePlay();
-  }
-
-  /** Build the 14-actor `LivePlay` and reset per-down presentation state. Safe to
-   *  call again at snap time (idempotent: everything below is recomputed from the
-   *  same unchanged session state, and the sim clock has not advanced yet). */
-  private prepareLivePlay(): void {
-    const play = catalogForDown(this.session.down)[this.selectedPlayIndex]!;
-    this.isPassPlay = play.kind === 'PASS';
-    this.isKickPlay = play.kind === 'PUNT' || play.kind === 'FIELD_GOAL';
-    // Capture the starting LOS for this down; every projection below uses it even
-    // after `snap()` advances `session.los`, and the PRE_SNAP formation needs it.
-    this.liveLos = this.session.los;
-    // Prime the nasty audible field effects for this play (boost, grenades, gas,
-    // hex, shroud); the sim already computed `session.effects` from valid actives.
-    this.nastyFields = new NastyFieldEffects();
-    this.nastyFields.begin(this.session.effects);
-    const input = buildLivePlayInput(this.session, play.id, DEFAULT_DEFENSE, 0x9e3779b9);
-    this.live = new LivePlay(input);
-    // Initialize ball presentation ownership at formation time too: the opening
-    // PRE_SNAP formation is rendered before `beginLivePlay()` runs, and anchoring
-    // the ball to the live carrier here means a prior down's holder can't leak
-    // into (or vanish from) this formation.
-    this.ballHolderId = this.live.carrier.id;
-    this.liveResult = null;
-    this.highlightDefender = -1;
-    this.simAccumulator = 0;
-    this.runDist.clear();
-    this.lastPos.clear();
-    // Reset per-down presentation state *before* the formation's first render so
-    // a pass play that ended in a tackle (windows still open) never leaks its
-    // throwing-QB / receiver-badge state into the next formation's idle actors.
-    this.animClock.clear();
-    this.animKind.clear();
-    this.presentation.clear();
-    this.windowsOpen = false;
-    this.windowOpenPressConsumed = false;
-    this.ballFlight = null;
-    this.damagePopups = [];
-    this.casualties = [];
-    this.looseBall = null;
-    // Reset the Ghoul Gas cloud with the other per-down presentation state: if the
-    // previous down ended while gas was active, `liveElapsed` stays frozen through
-    // the banner/PRE_SNAP, so a stale cloud would otherwise keep drawing over the
-    // next formation until the snap (which resets it too).
-    this.gasCloud = null;
-    // Same for the throw-release window: a prior down's launch must not leave the
-    // QB frozen in a wind-up while the next formation renders its idle stance.
-    this.passingUntil = -1;
-    // Capture the starting first-down target now; `snap()` mutates
-    // `session.yardsToGo` when the result commits, which would otherwise drag the
-    // amber line during the banner while the actors + LOS stay frozen. The
-    // projector adds the 10-yard end-zone offset, so convert here as well.
-    this.firstDownFieldX = this.liveLos + this.session.yardsToGo + 10;
-  }
-
-  private beginLivePlay(): void {
-    // The actor list is already built in `prepareLivePlay()` at pick time; only
-    // the transient *runtime* state that accumulates during a live down is reset
-    // here, then the sim clock starts.
-    this.kickHoldMs = 0;
-    this.kickLocked = null;
-    this.kickCommitted = false;
-    this.passHoldMs = 0;
-    this.heldThrowKey = null;
-    this.windowsOpen = false;
-    this.windowOpenPressConsumed = false;
-    this.ballFlight = null;
-    this.damagePopups = [];
-    this.casualties = [];
-    this.looseBall = null;
-    // The center/QB holds the ball at the snap; presentation ownership reverts to
-    // the live carrier until a pass launches it or a fumble knocks it loose.
-    this.ballHolderId = this.live?.carrier.id ?? null;
-    this.pendingHazardHits = [];
-    this.liveElapsed = 0;
-    this.nastySnap = null;
-    this.gasCloud = null;
-    this.passingUntil = -1;
-    // Nasties are *selected* during PRE_SNAP (`session.callNasty`), after the pick
-    // already primed the field effects at `prepareLivePlay()`. Reinitialize at snap
-    // from the final pre-snap selection so a Dynamite Pitch arms its grenade count
-    // and Hex/Shroud arm their timers instead of staying at their pick-time zeroes.
-    this.nastyFields.begin(this.session.effects);
-    // Entering the live down is part of building it: both the KeyC pre-snap path
-    // and the e2e debug handle call `beginLivePlay()` directly, and both must land
-    // in LIVE with a populated `this.live` (otherwise `updateLive` early-returns
-    // forever and the whistle never fires).
-    this.mode = 'LIVE';
-  }
-
-  // ------------------------------------------------------------- live loop
-
-  private updateLive(dt: number): void {
-    // Ball-in-flight animation runs to completion before further input lands.
-    if (this.ballFlight) {
-      this.advanceBallFlight(dt);
-      return;
-    }
-
-    const live = this.live;
-    if (!live) return;
-
-    // Kick plays (punt / field goal) run a timing meter instead of a live down:
-    // hold C to sweep the value, release C to lock it, then resolve and commit.
-    if (this.isKickPlay) {
-      this.updateKick(dt);
-      return;
-    }
-
-    if (this.pressedBtn('B') && !this.isPassPlay) {
-      // Defense: cycle which defender is the highlighted "user" pursuer.
-      this.highlightDefender = (this.highlightDefender + 1) % 7;
-    }
-
-    // Pass plays: C opens the receiving windows (scope: behind LOS); A/B/C throw
-    // to the matching receiver while the windows are open. Hold length sets style.
-    if (this.isPassPlay) {
-      const cHeld = this.buttonHeld('C');
-
-      // The C press that opens the windows must NOT also throw to receiver C in
-      // the same press: it is consumed once. Only a *fresh* subsequent C press (its
-      // own keydown) — while windows are already open — is treated as a throw to C.
-      // When windows are still closed, the same C press only opens them.
-      if (this.pressedBtn('C') && !this.windowsOpen && !this.windowOpenPressConsumed) {
-        // Windows may only open while the QB is behind (or on) the line of
-        // scrimmage. Once the QB scrambles downfield the option is unavailable.
-        const qb = live.snapshot().actors.find((a) => a.id === live.carrier.id);
-        if (qb && qb.x <= 0) {
-          this.windowsOpen = true;
-          this.passHoldMs = 0;
-          // Consume this C press so it cannot double as a throw, until a genuinely
-          // new C keydown arrives (cleared on the next input edge).
-          this.windowOpenPressConsumed = true;
-        }
-      }
-      // A fresh C keydown re-arms the throw-to-C path (and window re-open); cleared
-      // per-input-edge so holding C through several render frames never re-opens the
-      // windows and never re-fires the opening consume.
-
-      if (this.windowsOpen) {
-        // A/B throw on *release*, so a held receiver button accumulates hold time
-        // and only launches (lob vs bullet by duration) when the player lets go.
-        if (this.buttonHeld('A')) {
-          if (!this.heldThrowKey) this.heldThrowKey = 'A';
-        } else if (this.buttonHeld('B')) {
-          if (!this.heldThrowKey) this.heldThrowKey = 'B';
-        }
-        const aUp = this.releasedBtn('A');
-        const bUp = this.releasedBtn('B');
-        const released =
-          this.heldThrowKey === 'A' && aUp ? 'A' : this.heldThrowKey === 'B' && bUp ? 'B' : null;
-        // C throws to receiver C, but only on a deliberate press AFTER the window-
-        // opening press (so opening the windows never instantly picks C).
-        const cUp = this.releasedBtn('C');
-        const cTarget = !this.windowOpenPressConsumed && cUp ? 'C' : null;
-
-        // Accumulate hold time by *elapsed* time (seconds → ms), not a fixed 16 ms
-        // per rendered frame: otherwise the same physical hold produces a lob or a
-        // bullet depending on refresh rate and shorter air time on faster displays.
-        if (this.heldThrowKey || (cHeld && !this.windowOpenPressConsumed)) {
-          this.passHoldMs += dt * 1000;
-        } else if (!released && !cTarget) {
-          this.passHoldMs = 0;
-        }
-
-        const target = released ?? cTarget;
-        if (target) {
-          this.commitPass(target);
-          this.heldThrowKey = null;
-          return;
-        }
-      } else {
-        this.passHoldMs = 0;
-        this.heldThrowKey = null;
-      }
-    }
-
-    // Feed the carrier command *inside* the fixed-step loop below, because the
-    // nasty-field snapshot (hex inversion, Bat-Wing speed, grenade triggers) is
-    // computed per step and must color the very same command that step consumes.
-    const turboHeld = this.buttonHeld('C');
-    const pressedBThisTick = this.pressedBtn('B') && this.isPassPlay === false;
-
-    // Advance a fixed-timestep 60 Hz simulation: accumulate the elapsed render
-    // time and consume exactly the fixed steps due, so the field runs at real time
-    // on any refresh rate (with 4 as a catch-up cap under a janky RAF). Hazards are
-    // evaluated on *these same* steps, not once per render frame.
-    this.simAccumulator += dt;
-    const fixedDt = 1 / 60;
-    let steps = 0;
-    while (this.simAccumulator >= fixedDt && steps < 4) {
-      this.simAccumulator -= fixedDt;
-      this.liveElapsed += fixedDt;
-      steps++;
-
-      // Advance the nasty-field clocks once per fixed step (hex/gas/shroud timers,
-      // grenade/gas triggers) and capture the snapshot that movement, input and
-      // overlays all read this step.
-      const carrier0 = live.snapshot().actors.find((a) => a.id === live.carrier.id);
-      this.nastySnap = this.nastyFields.tick({
-        effects: this.session.effects,
-        t: this.liveElapsed,
-        pressedB: pressedBThisTick,
-        pressedC: this.pressedBtn('C'),
-        carrierTeam: carrier0?.team ?? this.session.possession,
-        carrierSlot: carrier0?.slot ?? 'RB1',
-      });
-
-      // Hex of Confusion inverts the carrier's steering while its timer is live.
-      let sx = this.playerInput.x;
-      let sy = this.playerInput.y;
-      if (this.nastySnap.hexRemaining > 0) {
-        sx = -sx;
-        sy = -sy;
-      }
-
-      live.command({
-        steerX: sx,
-        steerY: sy,
-        dive: this.pressedBtn('A') && !this.isPassPlay,
-        turbo: turboHeld,
-        frictionMult: this.lastFriction,
-        slowMult: this.lastSlow,
-        // Bat-Wing Jet Boost (+65% carrier speed) threads through here.
-        speedMult: this.nastySnap.carrierSpeedMult,
-      });
-
-      const outcome = live.advance();
-
-      // Apply nasty on-field effects that mutate the play (grenade/gas damage is
-      // still committed via snap at whistle; here we surface the visible trigger).
-      this.applyNastyStep(fixedDt);
-
-      // Hazard terrain: evaluate on each fixed step so hazard effects advance at the
-      // same rate as ball flight and movement.
-      this.hazardManager.tick(fixedDt);
-      const carrier = live.snapshot().actors.find((a) => a.id === live.carrier.id);
-      if (carrier) {
-        const influence = this.hazardManager.evaluate(
-          carrier.x + this.liveLos,
-          carrier.y,
-          { team: carrier.team, side: carrier.side, slot: carrier.slot as Slot },
-          carrier.diving,
-          fixedDt,
-        );
-        // Thread the terrain modifiers into the carrier's NEXT commanded step (bog
-        // friction, sludge slow) so graveyard tombstones and swamp patches actually
-        // impede the carrier rather than being inert.
-        this.lastFriction = influence.frictionMult;
-        this.lastSlow = influence.slowMult;
-        for (const hit of influence.hits) {
-          this.pendingHazardHits.push(hit);
-          // Surface the first hazard hit as a floating damage popup at the victim.
-          if (this.hazardArmedForDemo) {
-            const f = projectActor(carrier.x, carrier.y, this.liveLos);
-            const s = projectToScreen(f.x, f.y);
-            this.damagePopups.push({
-              x: s.x,
-              y: s.y - 20,
-              text: `-${hit.amount}`,
-              color: toPhaserColor('PUMPKIN_ORANGE'),
-              ttl: 1.2,
-            });
-            this.hazardArmedForDemo = false;
-          }
-        }
-      }
-      if (outcome.kind === 'WHISTLE') break;
-
-      // Accumulate actual distance travelled this fixed step (before the next
-      // command overwrites positions) so run-frame playback advances with real
-      // ground covered — not velocity × rendered frame, which runs fast at high
-      // refresh and keeps counting during hit-stop/ball-flight/banner freezes.
-      for (const a of live.snapshot().actors) {
-        const prev = this.lastPos.get(a.id);
-        if (prev) {
-          const d = this.runDist.get(a.id) ?? 0;
-          this.runDist.set(a.id, d + Math.hypot(a.x - prev.x, a.y - prev.y));
-        }
-        this.lastPos.set(a.id, { x: a.x, y: a.y });
-      }
-    }
-
-    if (live.snapshot().outcome.kind === 'WHISTLE') {
-      this.liveResult = live.result();
-      this.commitOutcome();
-    }
-  }
-
-  /**
-   * Punt / field-goal timing meter (button C). Holding C sweeps the meter value;
-   * releasing C locks it. On lock the kick resolves through `session.snap` with an
-   * explicit `puntYards` / `fieldGoalGood`, so the KickMeter actually drives the
-   * special-teams outcome instead of being dead code.
-   */
-  private updateKick(dt: number): void {
-    const play = catalogForDown(this.session.down)[this.selectedPlayIndex]!;
-    const cHeld = this.buttonHeld('C');
-
-    if (this.kickLocked === null) {
-      if (cHeld) {
-        this.kickHoldMs += dt * 1000; // ms like the pass hold timer
-      } else if (this.kickHoldMs > 0) {
-        // Released after a hold → lock the current sweep position.
-        this.kickLocked = meterValue(this.kickHoldMs / 1000);
-      }
-      return;
-    }
-
-    // Resolved: commit once, then the banner path advances the down as usual.
-    if (this.kickCommitted) return;
-    this.kickCommitted = true;
-
-    const distanceToGoal = 100 - this.session.los;
-    const outcome = resolveKick(this.kickLocked, distanceToGoal, play.kind === 'PUNT' ? 60 : 0);
-    const force: { puntYards?: number; fieldGoalGood?: boolean } = {};
-    if (play.kind === 'PUNT') force.puntYards = outcome.puntYards;
-    else force.fieldGoalGood = outcome.fieldGoalGood;
-
-    const res = this.session.snap({ force } as Parameters<GameSession['snap']>[0]);
-    // A punt / field goal resolves instantly: the ball is away the moment the
-    // kick is locked. Clear presentation ownership so the carrier doesn't keep a
-    // carried-football sprite at its hands through the special-teams result
-    // banner (there is no in-flight overlay on kicks to take over from it).
-    this.ballHolderId = null;
-    this.showBanner(res.banner);
-    this.collectDamageAndCasualties();
-  }
-
-  /** Advance the airborne ball by elapsed real time; resolve on landing. */
-  private advanceBallFlight(dt: number): void {
-    const b = this.ballFlight;
-    if (!b) return;
-    // Advance by the elapsed frame time, not a fixed 1/60 s per rendered frame:
-    // otherwise the ball lands sooner on faster displays (frame-rate coupling).
-    b.t += dt;
-    // The throw-release window (`passingUntil`) is measured on `liveElapsed`, but
-    // `updateLive` returns early while the ball is in flight, so that clock would
-    // otherwise freeze at launch time and a lob would hold the QB in the final
-    // throw pose until landing (lobs routinely outlast the 0.6 s release window).
-    // Advance it here too so the QB's release pose decays back to idle/run a fixed
-    // 0.6 s after the launch, independent of how long the ball stays airborne.
-    this.liveElapsed += dt;
-    if (b.t >= b.dur) {
-      this.ballFlight = null;
-      b.onLand();
-    }
-  }
-
-  /**
-   * Surface the nasty-field effects produced this fixed step. Grenades and gas
-   * damage are committed by the sim at the whistle (it resolves DYNAMITE_PITCH /
-   * GHOUL_GAS weapon damage from the active play), so here we only render the
-   * *visible* trigger — a flicker marker at the carrier and, for a grenade, a
-   * popup at a nearby defender. Shroud (spectral alpha) and Kill Ref (hunt state)
-   * are read live in the render pass from `this.nastySnap` + the session ref.
-   */
-  private applyNastyStep(_dt: number): void {
-    const snap = this.nastySnap;
-    if (!snap || !this.live) return;
-
-    const carrier = this.live.snapshot().actors.find((a) => a.id === this.live!.carrier.id);
-    if (!carrier) return;
-    const c = projectActor(carrier.x, carrier.y, this.liveLos);
-
-    // A grenade throw — a quick spark marker at the carrier and a damage popup on
-    // the nearest defender (the sim records the actual damage at snap).
-    if (snap.grenadesThrown > 0) {
-      const defenders = this.live.snapshot().actors.filter((a) => a.side === 'DEFENSE');
-      const target =
-        defenders.sort(
-          (a, b) =>
-            (a.x - carrier.x) ** 2 +
-            (a.y - carrier.y) ** 2 -
-            ((b.x - carrier.x) ** 2 + (b.y - carrier.y) ** 2),
-        )[0] ?? carrier;
-      const tp = projectActor(target.x, target.y, this.liveLos);
-      const ts = projectToScreen(tp.x, tp.y);
-      this.damagePopups.push({
-        x: ts.x,
-        y: ts.y - 20,
-        text: 'BOOM!',
-        color: toPhaserColor('PUMPKIN_ORANGE'),
-        ttl: 0.9,
-      });
-    }
-
-    // Ghoul Gas drop — mark the cloud so the render pass dims defenders near it.
-    if (snap.gasDropped) {
-      this.gasCloud = { x: c.x, y: c.y, until: this.liveElapsed + 3 };
-    }
-  }
-
-  /**
-   * Launch a pass throw to receiver A/B/C. The ball flies a closed-form arc
-   * (lob or bullet by hold length) and only resolves catch vs interception on
-   * landing, giving the shadow/z flight its on-field moment.
-   */
-  private commitPass(target: 'A' | 'B' | 'C'): void {
-    const live = this.live;
-    if (!live) return;
-    const qb = live.snapshot().actors.find((a) => a.id === live.carrier.id);
-    const receiver = this.receiverFor(target);
-    if (!qb || !receiver) {
-      console.warn(
-        'commitPass: missing qb or receiver',
-        !!qb,
-        !!receiver,
-        'carrier',
-        live.carrier.id,
-        'receiver',
-        target,
-      );
-      return;
-    }
-    // A forward pass is only legal while the QB is behind (or on) the LOS. Guard
-    // here so the debug throw path cannot bypass the windows check and throw
-    // downfield after a scramble.
-    if (qb.x > 0) {
-      this.windowsOpen = false;
-      return;
-    }
-
-    const style = styleForHold(this.passHoldMs);
-    const holdMs = this.passHoldMs;
-    const dist = Math.hypot(receiver.x - qb.x, receiver.y - qb.y);
-    const speed = style === 'BULLET' ? 22 : 13;
-    // Keep the animation readable regardless of distance (min ~0.45s).
-    const dur = Math.max(0.45, dist / speed);
-    this.windowsOpen = false;
-    // The ball leaves the QB's hands the moment the throw launches; carried-ball
-    // rendering switches to the in-flight overlay (drawOverlays) for the duration.
-    this.ballHolderId = null;
-    // Arm the QB's one-shot throw release: play the row-9 release frames once while
-    // the ball is airborne (a ~0.5 s window covers even the fastest bullet), instead
-    // of snapping straight to idle the instant `windowsOpen` drops.
-    this.passingUntil = this.liveElapsed + 0.6;
-    this.ballFlight = {
-      fromX: qb.x,
-      fromY: qb.y,
-      toX: receiver.x,
-      toY: receiver.y,
-      t: 0,
-      dur,
-      style,
-      holdMs,
-      onLand: () => this.resolvePassLanding(target, holdMs),
-    };
-  }
-
-  private receiverFor(target: 'A' | 'B' | 'C'): LiveActorState | undefined {
-    const live = this.live;
-    if (!live) return undefined;
-    const slotFor = { A: 'WR/TE', B: 'RB2/WR', C: 'RB1' } as const;
-    const receiverId = `${this.session.possession}-${slotFor[target]}`;
-    return live.snapshot().actors.find((a) => a.id === receiverId);
-  }
-
-  private resolvePassLanding(target: 'A' | 'B' | 'C', holdMs: number): void {
-    const live = this.live;
-    if (!live) return;
-    const qb = live.snapshot().actors.find((a) => a.id === live.carrier.id);
-    const receiver = this.receiverFor(target);
-    const defs = live.snapshot().actors.filter((a) => a.side === 'DEFENSE');
-    if (!qb || !receiver) return this.endDownFromPass();
-
-    const snap = resolvePassAttempt(
-      {
-        fromX: qb.x,
-        fromY: qb.y,
-        toX: receiver.x,
-        toY: receiver.y,
-        holdMs,
-        defenders: defs.map((d) => ({ id: d.id, x: d.x, y: d.y })),
-      },
-      target,
-    );
-    // Fold any accumulated hazard hits into the same snap.
-    if (this.pendingHazardHits.length > 0) snap.hazards = [...this.pendingHazardHits];
-    const res = this.session.snap(snap);
-    this.showBanner(res.banner);
-    // The receiver catches and holds the ball only on a completion; on a pick or
-    // deflection/incompletion the down ends without any field actor carrying it
-    // (the next down's snap re-initializes ownership). `live.carrier` still names
-    // the passer, so ownership must NOT fall back to the QB here.
-    this.ballHolderId = snap.force?.complete ? receiver.id : null;
-    this.collectDamageAndCasualties();
-    // A completed catch ends through `snap` (not `commitOutcome`), so the receiver's
-    // presentation state never runs through the play-over roll. Mirror it here from
-    // the committed result: a touchdown completion celebrates, an ordinary completion
-    // is tackled (GameSession already applied the receiver's tackle damage above) and
-    // drops into a knockdown. Death (a lethal hazard on the catch) still wins because
-    // `collectDamageAndCasualties` set `dead` first and `baseAnimation` prefers it.
-    if (snap.force?.complete) {
-      const res = this.session.lastResult;
-      const pres = this.presentation.get(receiver.id) ?? {};
-      if (!pres.dead) pres.celebrating = res?.touchdown === true;
-      if (!pres.dead && !pres.celebrating) pres.downed = true;
-      this.presentation.set(receiver.id, pres);
-    }
-    void qb;
-  }
-
-  private endDownFromPass(): void {
-    this.showBanner('INCOMPLETE');
-    this.collectDamageAndCasualties();
-  }
-
-  /** Show the play-over banner and enter the BANNER presentation state. */
-  private showBanner(text: string): void {
-    this.bannerText = text;
-    this.bannerKind = bannerKindForText(text);
-    this.bannerTimer = 2.2;
-    this.mode = 'BANNER';
-    this.renderKineticBanner(text);
-  }
-
-  /** Rebuild the `#banner` node as an animated GSN 66.6 broadcast banner. */
-  private renderKineticBanner(text: string): void {
-    const host = document.getElementById('banner');
-    if (!host) return;
-    host.replaceChildren(
-      buildBroadcastBanner(this.bannerKind, detailForKind(this.bannerKind, text)),
-    );
-  }
-
-  /** Read the just-committed snap's damage/casualties into floating popups. */
-  private collectDamageAndCasualties(): void {
-    const r = this.session.lastResult;
-    if (!r) return;
-    for (const d of r.damage) {
-      const actor = this.live?.actors.find((a) => a.slot === d.slot && a.team === d.team);
-      if (!actor) continue;
-      const f = projectActor(actor.x, actor.y, this.liveLos);
-      const s = projectToScreen(f.x, f.y);
-      this.damagePopups.push({
-        x: s.x,
-        y: s.y - 22,
-        text: `-${d.dealt}`,
-        color: toPhaserColor('VAMPIRE_CRIMSON'),
-        ttl: 1.4,
-      });
-    }
-    for (const c of r.casualties) {
-      const actor = this.live?.actors.find((a) => a.slot === c.slot && a.team === c.team);
-      if (!actor) continue;
-      const f = projectActor(actor.x, actor.y, this.liveLos);
-      const s = projectToScreen(f.x, f.y);
-      this.casualties.push({ id: actor.id, x: s.x, y: s.y, ttl: 2.0 });
-      // Presentation: a casualty kills the victim — the sprite plays its death
-      // pose while the red/bone bloom settles (Colour commentary handles the rest).
-      // Key the presentation state by the resolved *actor id* (a slot id like
-      // home-RB1), not the raw roster id (`c.playerId` is home-1), so drawActor's
-      // lookup by actor id actually selects the victim's casualty_death animation.
-      const pres = this.presentation.get(actor.id) ?? {};
-      pres.dead = true;
-      this.presentation.set(actor.id, pres);
-    }
-    if (r.fumble) {
-      const carrier = this.live?.carrier;
-      // A fumble knocks the ball loose: no field actor carries it, so the carried
-      // sprite must vanish (the loose-ball overlay takes over in drawOverlays).
-      this.ballHolderId = null;
-      if (carrier) {
-        const f = projectActor(carrier.x, carrier.y, this.liveLos);
-        const s = projectToScreen(f.x, f.y);
-        this.looseBall = { x: s.x, y: s.y, ttl: 2.0 };
-      }
-    }
-  }
-
-  /** Commit the live-play result into the session and show the play-over banner. */
-  private commitOutcome(): void {
-    const r = this.liveResult!;
-    // The live carrier's final downfield position IS the gain from scrimmage;
-    // keep it fractional so GameSession classifies TDs/safeties exactly. Pass the
-    // out-of-bounds whistle through so the session stops the clock and skips
-    // tackle damage / contact fumbles on an untouched sideline exit.
-    const yards = r.finalX;
-    const snap: {
-      force: {
-        yards: number;
-        outOfBounds?: boolean;
-        tackleDamage?: number;
-        fumble?: boolean;
-        sacked?: boolean;
-        qbRun?: boolean;
-      };
-      hazards?: HazardHit[];
-    } = {
-      force: { yards, outOfBounds: r.outOfBounds },
-    };
-    // Tackle damage: the tackler's rating naively scales a base hit.
-    if (r.tackler) snap.force.tackleDamage = 6 + Math.floor(8 * 0.5);
-
-    // Pass plays that end at the whistle with no ball in flight are a QB scramble:
-    // the QB never threw, so the down must be committed as a sack (tackled behind
-    // the LOS), an incomplete (out of bounds behind the LOS, preserving the measured
-    // loss so the next snap backs up the actual distance), or a run with the QB as
-    // carrier (past the LOS, keeping the positive gain). Delegating to the pure
-    // `resolveScrambleOutcome` keeps this scene→session mapping unit-testable.
-    if (this.isPassPlay && r.outcome.kind === 'WHISTLE') {
-      const scramble = resolveScrambleOutcome({
-        finalX: r.finalX,
-        outOfBounds: r.outOfBounds,
-        outcome: r.outcome,
-      });
-      if (scramble.sacked) snap.force.sacked = true;
-      if (scramble.qbRun) snap.force.qbRun = true;
-      snap.force.yards = scramble.yards;
-    }
-
-    if (this.pendingHazardHits.length > 0) snap.hazards = [...this.pendingHazardHits];
-    const res = this.session.snap(snap as Parameters<GameSession['snap']>[0]);
-    this.showBanner(res.banner);
-    this.collectDamageAndCasualties();
-
-    // Presentation for the play-over roll: the tackled carrier drops into a
-    // knockdown, the scoring carrier celebrates, and the tackler celebrates the
-    // stop. These persist only until the next down's formation is prepared.
-    const carrierId = this.live?.carrier.id;
-    if (carrierId) {
-      const pres = this.presentation.get(carrierId) ?? {};
-      if (r.touchdown) pres.celebrating = true;
-      else if (r.tackler) pres.downed = true;
-      this.presentation.set(carrierId, pres);
-    }
-    if (r.tackler) {
-      // `r.tackler` is the tackler's *actor id* (`away-DL1`), not its slot:
-      // `LivePlay` records `nearest.id` (LivePlay.ts:492). Match against `a.id`
-      // so the tackler's stop celebration lands on the defender sprite.
-      const tackler = this.live?.actors.find((a) => a.id === r.tackler && a.side === 'DEFENSE');
-      if (tackler) {
-        const tacklerPres = this.presentation.get(tackler.id) ?? {};
-        tacklerPres.celebrating = true;
-        this.presentation.set(tackler.id, tacklerPres);
-      }
-    }
-  }
-
-  private updateBanner(dt: number): void {
-    // Terminal game: keep showing the final banner; no dismiss/period logic runs.
-    if (this.gameOver) return;
-    this.bannerTimer -= dt;
-    if (this.bannerTimer > 0) return;
-
-    // A carnage forfeit (or a final-play snap) may already have left the session in
-    // GAME_OVER; `dismissBanner()` throws outside PLAY_OVER_BANNER, so only dismiss
-    // when a play-over banner is actually pending.
-    if (this.session.phase === 'PLAY_OVER_BANNER') this.session.dismissBanner();
-
-    // Collapse extra-point / kickoff / period wind-downs to the next huddle. A
-    // quarter-ending snap transitions to QUARTER_END or HALFTIME, which need an
-    // explicit `advancePeriod()` (its halftime kickoff then resolves through this
-    // same loop) before another play can be offered.
-    let guard = 0;
-    while (
-      this.session.phase !== 'HUDDLE_PLAYCALL' &&
-      this.session.phase !== 'GAME_OVER' &&
-      guard++ < 12
-    ) {
-      if (this.session.phase === 'EXTRA_POINT') this.session.extraPoint('KICK');
-      else if (this.session.phase === 'KICKOFF') this.session.kickoff({ touchback: true });
-      else if (this.session.phase === 'PLAY_OVER_BANNER') this.session.dismissBanner();
-      else if (this.session.phase === 'QUARTER_END' || this.session.phase === 'HALFTIME') {
-        this.session.advancePeriod();
-      } else break;
-    }
-
-    // After a terminal snap the session is GAME_OVER and no further play can be
-    // selected; leaving it in PICK would let `selectPlays()` throw on the next down.
-    this.live = null;
-    this.liveResult = null;
-    this.gameOver = this.session.phase === 'GAME_OVER';
-    this.mode = this.gameOver ? 'BANNER' : 'PICK';
-    // A terminal game pins the banner: it no longer runs dismiss logic (the while
-    // loop below is skipped), and refreshUi() mirrors the final phase/winners.
-  }
+  // ------------------------------------------------------------- rendering
 
   // ------------------------------------------------------------- rendering
 
@@ -1329,12 +559,12 @@ export class MatchScene extends Phaser.Scene {
       carrierScreen: () => this.carrierScreen,
       camZoom: () => this.camera.zoom,
       bannerKind: () => this.bannerKind,
-      confirmPlay: (index) => this.confirmPlay(index),
-      beginLivePlay: () => this.beginLivePlay(),
+      confirmPlay: (index) => this.match.confirmPlay(index),
+      beginLivePlay: () => this.match.beginLivePlay(),
       openPassWindows: () => {
         if (this.mode === 'LIVE' && this.isPassPlay) this.windowsOpen = true;
       },
-      commitPassTo: (t) => this.commitPass(t),
+      commitPassTo: (t) => this.match.commitPass(t),
       relocateCarrier: (x, y) => {
         const l = this.live;
         if (!l) return;

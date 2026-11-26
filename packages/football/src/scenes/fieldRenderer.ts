@@ -51,23 +51,21 @@ export const FIELD_CANVAS_HEIGHT = 360;
  * the x=10/110 goal lines, so the end-zone and field-of-play textures never
  * bleed across each other.
  */
-export function drawFieldSprites(
-  scene: {
-    textures: { exists(key: string): boolean };
-    add: {
-      tileSprite(
-        x: number,
-        y: number,
-        width: number,
-        height: number,
-        key: string,
-      ): {
-        setOrigin(x: number, y: number): { setDepth(d: number): unknown };
-        setDepth(d: number): unknown;
-      };
+export function drawFieldSprites(scene: {
+  textures: { exists(key: string): boolean };
+  add: {
+    tileSprite(
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      key: string,
+    ): {
+      setOrigin(x: number, y: number): { setDepth(d: number): unknown };
+      setDepth(d: number): unknown;
     };
-  },
-): void {
+  };
+}): void {
   const turf = 'cursed_graveyard_turf';
   const endzone = 'cursed_graveyard_endzone';
   if (!scene.textures.exists(turf)) return;
@@ -258,7 +256,12 @@ function drawBlockText(g: DrawSurface, text: string, cx: number, cy: number, s: 
       for (let row = 0; row < 5; row++) {
         for (let col = 0; col < 3; col++) {
           if (bits & (1 << (row * 3 + col))) {
-            g.fillRect(x0 + col * cw - inset, y0 + row * ch - inset, cw + inset * 2, ch + inset * 2);
+            g.fillRect(
+              x0 + col * cw - inset,
+              y0 + row * ch - inset,
+              cw + inset * 2,
+              ch + inset * 2,
+            );
           }
         }
       }
