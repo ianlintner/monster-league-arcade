@@ -38,6 +38,19 @@ export default tseslint.config(
     },
   },
   {
+    // File-size ceiling (ARCHITECTURE.md): ~400 LOC target, 450 hard trigger.
+    // Scoped to package sources; tests are exempt, and the grandfathered MVP
+    // cores (GameSession.ts, Playbook.ts) carry a file-local eslint-disable.
+    files: ['packages/**/*.ts'],
+    ignores: ['**/*.test.ts'],
+    rules: {
+      'max-lines': [
+        'error',
+        { max: 450, skipBlankLines: true, skipComments: true },
+      ],
+    },
+  },
+  {
     files: ['apps/arcade-hub/**/*.ts', 'packages/**/*.ts'],
     languageOptions: {
       globals: { ...globals.browser },

@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- grandfathered MVP core (ARCHITECTURE.md "File-size ceiling"); split along existing seams when touched, not speculatively. */
 import {
   CRYPT_BLITZ_MULT,
   DYNAMITE_GRENADES,
