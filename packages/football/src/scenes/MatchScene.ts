@@ -12,7 +12,6 @@
 import * as Phaser from 'phaser';
 import {
   HALLOWEEN_MIDNIGHT_PALETTE as P,
-  type FactionId,
   projectToScreen,
   toPhaserColor,
 } from '@monster-league/shared-core';
@@ -23,6 +22,13 @@ import { drawFieldSprites, drawField, drawHazards, hazardStateKey } from './fiel
 import type { DrawSurface } from './fieldRenderer';
 import { stepCamera, clampFocus, INITIAL_CAMERA } from './cameraRig';
 import type { CameraState } from './cameraRig';
+import {
+  composeReadyLine,
+  updateScorebug,
+  clearBannerIfNotActive,
+  syncHud,
+  syncHuddle,
+} from './hudBridge';
 import { LivePlay, type LiveActorState, type LivePlayResult } from '../field/LivePlay';
 import { HazardManager } from '../field/HazardManager';
 import { resolvePassAttempt, resolveScrambleOutcome } from '../field/PlayOrchestrator';
@@ -34,11 +40,6 @@ import type { HazardHit } from '../sim/GameSession';
 import {
   bannerKindForText,
   buildBroadcastBanner,
-  buildHuddleOverlay,
-  downDistanceLabel,
-  factionName,
-  formatClock,
-  losLabel,
   type BannerKind,
 } from '../ui/hud';
 import {
@@ -1668,157 +1669,41 @@ export class MatchScene extends Phaser.Scene {
   // ------------------------------------------------------------- HUD / dom
 
   private refreshUi(): void {
-    const clock = `${String(Math.floor(this.session.clock / 60)).padStart(2, '0')}:${String(
-      Math.floor(this.session.clock % 60),
-    ).padStart(2, '0')}`;
-    const down = `DOWN ${this.session.down} · ${this.session.yardsToGo} TO GO`;
-
-    let prompt = '';
-    switch (this.mode) {
-      case 'PICK': {
-        const cat = catalogForDown(this.session.down);
-        prompt = `Call the play — [A=J] ${cat[0]!.label} · [B=K] ${cat[1]!.label} · [C=L] ${cat[2]!.label}`;
-        break;
-      }
-      case 'PRE_SNAP':
-        prompt = `Pre-Snap: [C=L] Snaps the ball · ${down}`;
-        break;
-      case 'LIVE':
-        prompt = this.isKickPlay
-          ? this.kickLocked === null
-            ? `Hold [C=L] to sweep the kick meter, release to lock · ${down}`
-            : `Kick locked · ${down}`
-          : `Live: WASD run · [A=J] Dive · [C=L] Turbo · [B=K] Switch defender`;
-        break;
-      case 'BANNER':
-        prompt = this.bannerText;
-        break;
-    }
-    const line = `${down}  ${clock}\n${prompt}`;
-    this.readyText.setText(line);
-    this.updateDom(line);
+    const hudState = {
+      session: this.session,
+      mode: this.mode,
+      bannerText: this.bannerText,
+      isKickPlay: this.isKickPlay,
+      kickLocked: this.kickLocked,
+      huddleFingerprint: this.huddleFingerprint,
+    };
+    const { readyText, controlLine } = composeReadyLine(hudState);
+    this.huddleFingerprint = hudState.huddleFingerprint;
+    this.readyText.setText(readyText);
+    this.updateDom(controlLine);
   }
 
   private updateDom(line: string): void {
-    // Update the scorebug's value cells in place rather than overwriting the
-    // component's `textContent`, which would destroy its team names/swatches.
-    const scorebug = document.querySelector('[data-testid="scorebug"]');
-    if (scorebug) {
-      const scores = scorebug.querySelectorAll('.gsn-scorebug__score');
-      if (scores.length >= 2 && scores[0] && scores[1]) {
-        scores[0].textContent = String(this.session.score.home);
-        scores[1].textContent = String(this.session.score.away);
-      }
-      const meta = scorebug.querySelector('.gsn-scorebug__meta');
-      if (meta) meta.textContent = `Q${this.session.quarter}`;
-      const center = scorebug.querySelector('.gsn-scorebug__center');
-      const clock = center?.children[1];
-      if (clock) {
-        clock.textContent = `${String(Math.floor(this.session.clock / 60)).padStart(2, '0')}:${String(
-          Math.floor(this.session.clock % 60),
-        ).padStart(2, '0')}`;
-      }
-    }
-    this.syncHud();
-    this.syncHuddle();
+    const hudState = {
+      session: this.session,
+      mode: this.mode,
+      bannerText: this.bannerText,
+      isKickPlay: this.isKickPlay,
+      kickLocked: this.kickLocked,
+      huddleFingerprint: this.huddleFingerprint,
+    };
+    updateScorebug(document, this.session);
+    syncHud(document, this.session);
+    syncHuddle(document, hudState); // mutates hudState.huddleFingerprint in place
+    this.huddleFingerprint = hudState.huddleFingerprint;
     const prompt = document.querySelector('.gsn-control-bar__prompt');
     if (prompt) prompt.textContent = line;
-
-    const banner = document.getElementById('banner');
-    if (banner) {
-      if (this.mode !== 'BANNER') {
-        // Kinematic banners own their children; clear without touching the host.
-        if (banner.children.length > 0) banner.replaceChildren();
-      }
-    }
+    clearBannerIfNotActive(document, this.mode);
   }
 
-  /**
-   * Sync the broadcast HUD's game-state cells (casualty skulls, down & distance,
-   * play clock, ball position, bribed-ref badge) from `GameSession` in place.
-   * Idempotent and null-guarded so it is safe to call every rendered frame.
-   */
-  private syncHud(): void {
-    const root =
-      document.querySelector('.gsn-scorebug-shell') ??
-      document.querySelector('[data-testid="scorebug"]');
-    if (!root) return;
-    const s = this.session;
-
-    // Casualty skulls.
-    for (const side of ['home', 'away'] as const) {
-      const row = root.querySelector(`[data-testid="skulls-${side}"]`);
-      if (!row) continue;
-      const count = s.roster[side].casualties;
-      Array.from(row.children).forEach((skull, i) => {
-        skull.setAttribute('data-lit', String(i < count));
-      });
-    }
-
-    // Play clock + down/distance + ball position (added by the enriched scorebug).
-    const playclock = root.querySelector('.gsn-scorebug__playclock');
-    if (playclock) playclock.textContent = `PLAY ${formatClock(s.playClock)}`;
-    const down = root.querySelector('.gsn-scorebug__down');
-    if (down) down.textContent = downDistanceLabel(s.down, s.yardsToGo);
-    const los = root.querySelector('.gsn-scorebug__los');
-    if (los) los.textContent = losLabel(s.los, s.possession);
-
-    // Bribed-ref badge (text + active flag, so a change of briber re-syncs the label).
-    const bribe = root.querySelector('[data-testid="bribe-badge"]');
-    if (bribe) {
-      const bribed = s.ref.isBribed ? s.ref.bribedBy : null;
-      bribe.setAttribute('data-active', String(bribed !== null));
-      if (bribed) {
-        // `roster[x].faction` is the Roster's uppercase Faction enum; the shared
-        // `factionName`/FACTIONS lookup key is the lowercase `FactionId`.
-        const id = (f: string): FactionId => f.toLowerCase() as FactionId;
-        const briber = id(s.roster[bribed].faction);
-        const victim = id(s.roster[bribed === 'home' ? 'away' : 'home'].faction);
-        bribe.textContent = `BRIBED REF · ${factionName(briber)} paid · flags ${factionName(victim)}`;
-      } else {
-        bribe.textContent = '';
-      }
-    }
-  }
-
-  /**
-   * Render the Genesis huddle overlay (formation + A/B/C play cards) into the
-   * `#huddle` node while the scene is in PICK, and clear it otherwise. The play
-   * cards mirror `catalogForDown` so the overlay and the control bar agree.
-   */
-  private syncHuddle(): void {
-    const host = document.getElementById('huddle');
-    if (!host) return;
-    if (this.mode !== 'PICK') {
-      host.replaceChildren();
-      host.hidden = true;
-      this.huddleFingerprint = '';
-      return;
-    }
-    const cat = catalogForDown(this.session.down);
-    const plays = cat.map((p, i) => ({
-      label: (['A', 'B', 'C'] as const)[i]!,
-      name: p.label,
-      kind: p.kind,
-      formation: p.kind === 'PASS' ? 'SHOTGUN' : 'I-FORM',
-    }));
-    const availableNasties = this.session.charges.remaining(
-      this.session.possession,
-      this.session.half,
-    );
-    const formations = [...new Set(plays.map((p) => p.formation))];
-    const fingerprint = JSON.stringify({
-      down: this.session.down,
-      plays: cat.map((p) => p.id),
-      formations,
-      nasties: availableNasties,
-    });
-    if (fingerprint === this.huddleFingerprint) return; // nothing changed this frame
-    this.huddleFingerprint = fingerprint;
-
-    host.replaceChildren(buildHuddleOverlay({ formations, plays, availableNasties }));
-    host.hidden = false;
-  }
+  // --------------------------------------------------------------------------
+  // `syncHud` / `syncHuddle` DOM wiring now lives in `hudBridge.ts`; see
+  // `refreshUi`/`updateDom` above for the delegation.
 
   // ------------------------------------------------------------- debug handle
 
