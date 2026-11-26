@@ -35,7 +35,6 @@ import { resolvePassAttempt, resolveScrambleOutcome } from '../field/PlayOrchest
 import { styleForHold } from '../field/Ballistics';
 import { NastyFieldEffects } from '../field/NastyFieldEffects';
 import { resolveKick, meterValue } from '../field/KickMeter';
-import { decideCoachPlay } from '../ai/AICoach';
 import type { HazardHit } from '../sim/GameSession';
 import {
   bannerKindForText,
@@ -51,6 +50,10 @@ import {
   type ActorPresentationState,
 } from './spriteRenderer';
 import { ActorPresenter, type PresentScene } from './actorPresenter';
+import {
+  installDebugHandle,
+  type DebugHandleSurface,
+} from './debugHandle';
 
 export const CANVAS_WIDTH = 640;
 export const CANVAS_HEIGHT = 360;
@@ -269,7 +272,7 @@ export class MatchScene extends Phaser.Scene {
     // would otherwise race the (slow) atlas/sprite-sheet load. The getters below
     // are lazy and null-guarded, so they read correctly once `create()` populates
     // `session`/`live` and safely report null/'' before then.
-    this.exposeDebugHandle();
+    installDebugHandle(this.debugSurface());
   }
 
   // ------------------------------------------------------------- lifecycle
@@ -1307,132 +1310,32 @@ export class MatchScene extends Phaser.Scene {
 
   // ------------------------------------------------------------- debug handle
 
-  private exposeDebugHandle(): void {
-    // `session`/`hazardManager`/`lastResult` are populated in `create()`, which
-    // runs *after* `preload`; this handle is installed in the constructor (before
-    // the canvas is even on screen). Null-guard every session-backed getter so a
-    // spec that reads `window.__mlf.phase` mid-preload gets a calm `null`/`''`
-    // instead of a TypeError, then the real value once the scene boots.
-    const session = () => this.session ?? null;
-    const live = () => this.live;
-    const mode = () => this.mode;
-    const isPassPlay = () => this.isPassPlay;
-    const windowsOpen = () => this.windowsOpen;
-    const selectedPlay = () => this.selectedPlayIndex;
-    const lastResult = () => this.session?.lastResult ?? null;
-    const hazardManager = () => this.hazardManager;
-    const spriteBackedActors = () => this.spriteBackedActorCount;
-    const carrierScreen = () => this.carrierScreen;
-    const camZoom = () => this.camera.zoom;
-    const bannerKind = () => this.bannerKind;
-    const aiDecision = () => {
-      // Debug probe only: "what would the AI coach call for the team currently in
-      // possession on offense?" This is NOT live gameplay wiring — the human
-      // offense still calls its own play via `selectPlays`, and no `callNasty` is
-      // driven from here. Wiring a 1P-vs-AI opponent loop is deferred (see PR note).
-      const s = this.session;
-      if (!s) return null;
-      const team = s.possession;
-      return decideCoachPlay({
-        down: s.down,
-        yardsToGo: s.yardsToGo,
-        los: s.los,
-        quarter: s.quarter,
-        clockSeconds: s.clock,
-        score: s.score,
-        team,
-        aiIsOffense: true,
-        ownCasualties: s.roster[team].casualties,
-        refBribedAgainst: s.ref.isBribed && s.ref.bribedBy !== team,
-        demonRefActive: s.ref.kind === 'DEMON_REF',
-        availableNasties: s.charges.remaining(team, s.half),
-      });
-    };
-    (window as unknown as Record<string, unknown>).__mlf = {
-      session: session(),
-      get phase() {
-        return session()?.phase ?? '';
-      },
-      get mode() {
-        return mode();
-      },
-      get score() {
-        return session()?.score ?? null;
-      },
-      get los() {
-        return session()?.los ?? null;
-      },
-      get down() {
-        return session()?.down ?? null;
-      },
-      get carrierId() {
-        return live()?.carrier.id ?? null;
-      },
-      get isPassPlay() {
-        return isPassPlay();
-      },
-      get windowsOpen() {
-        return windowsOpen();
-      },
-      get playIndex() {
-        return selectedPlay();
-      },
-      get lastDamage() {
-        return lastResult()?.damage.length ?? 0;
-      },
-      get lastCasualties() {
-        return lastResult()?.casualties.length ?? 0;
-      },
-      get hazards() {
-        return hazardManager()?.snapshot() ?? [];
-      },
-      get bannerKind() {
-        return bannerKind();
-      },
-      get aiDecision() {
-        return aiDecision();
-      },
-      get actors() {
-        return (
-          live()?.actors.map((a) => ({ id: a.id, side: a.side, slot: a.slot, x: a.x, y: a.y })) ??
-          []
-        );
-      },
-      // Count of sprite-backed actors rendered last frame (14 field players +
-      // 1 referee). The e2e suite asserts this equals 15 so no actor ever regresses
-      // to a flat rectangle.
-      get spriteBackedActors() {
-        return spriteBackedActors();
-      },
-      // Read-only render seam for the readability acceptance: the controlled
-      // player's projected screen-space footprint plus the live camera zoom, so
-      // a spec can compute the on-screen sprite height (48 backing px × depth
-      // scale × camera zoom × integer CSS scale) and assert it stays readable.
-      get carrierScreen() {
-        const c = carrierScreen();
-        if (!c) return null;
-        return { px: c.px, py: c.py, scale: c.scale, camZoom: camZoom() };
-      },
-      pick: (i: number) => {
-        this.selectedPlayIndex = Math.max(0, Math.min(2, Number(i) || 0));
-        this.confirmPlay(this.selectedPlayIndex);
-      },
-      snap: () => {
-        // Build the live play *and* enter LIVE, matching the on-screen flow; a bare
-        // mode flip leaves `this.live` null so the down can never run to the whistle.
-        if (this.mode === 'PRE_SNAP') this.beginLivePlay();
-      },
-      openWindows: () => {
+  /** Build the read/write surface `debugHandle.installDebugHandle` assembles into
+   *  `window.__mlf`. Faithful port of the former `exposeDebugHandle`: same lazy
+   *  null-guarded reads, same driver guards (mode/pass/windows), same carrier
+   *  relocation arithmetic. */
+  private debugSurface(): DebugHandleSurface {
+    return {
+      session: () => this.session ?? null,
+      live: () => this.live,
+      mode: () => this.mode,
+      isPassPlay: () => this.isPassPlay,
+      windowsOpen: () => this.windowsOpen,
+      ballInFlight: () => this.ballFlight !== null,
+      selectedPlayIndex: () => this.selectedPlayIndex,
+      lastResult: () => this.session?.lastResult ?? null,
+      hazardManager: () => this.hazardManager,
+      spriteBackedActorCount: () => this.spriteBackedActorCount,
+      carrierScreen: () => this.carrierScreen,
+      camZoom: () => this.camera.zoom,
+      bannerKind: () => this.bannerKind,
+      confirmPlay: (index) => this.confirmPlay(index),
+      beginLivePlay: () => this.beginLivePlay(),
+      openPassWindows: () => {
         if (this.mode === 'LIVE' && this.isPassPlay) this.windowsOpen = true;
       },
-      throwTo: (t: 'A' | 'B' | 'C') => {
-        if (this.mode === 'LIVE' && this.isPassPlay && this.windowsOpen && !this.ballFlight) {
-          this.commitPass(t);
-        }
-      },
-      // Test seam: relocate the live carrier to an absolute field-of-play cell so
-      // the real hazard→damage/casualty pipeline fires deterministically.
-      forceCarrierTo: (x: number, y: number) => {
+      commitPassTo: (t) => this.commitPass(t),
+      relocateCarrier: (x, y) => {
         const l = this.live;
         if (!l) return;
         const c = l.carrier;
