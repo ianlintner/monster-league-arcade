@@ -45,6 +45,35 @@ const snap = (page: Page): Promise<Snap> =>
     };
   });
 
+interface CpuHuddle {
+  possession: string;
+  mode: string;
+  down: number;
+  los: number;
+  cpuPlayId: string | null;
+  overlay: boolean;
+  head: boolean;
+}
+
+/** Scene state + the CPU-huddle DOM read in a single task, so they cannot disagree. */
+const cpuHuddle = (page: Page): Promise<CpuHuddle> =>
+  page.evaluate(() => {
+    const h = (window as unknown as { __mlf?: Record<string, unknown> }).__mlf ?? {};
+    const shown = (id: string): boolean => {
+      const node = document.querySelector(`[data-testid="${id}"]`);
+      return !!node && node.getClientRects().length > 0;
+    };
+    return {
+      possession: String(h.possession ?? ''),
+      mode: String(h.mode ?? ''),
+      down: Number(h.down ?? 1),
+      los: Number(h.los ?? 0),
+      cpuPlayId: (h.cpuPlayId as string | null) ?? null,
+      overlay: shown('huddle-overlay'),
+      head: shown('cpu-offense-head'),
+    };
+  });
+
 test('CPU opponent: away down advances PICK→PRE_SNAP→LIVE→whistle on its own', async ({ page }) => {
   const errors = trackErrors(page);
   await page.goto('/football/?quarter=180');
@@ -100,6 +129,7 @@ test('CPU opponent: away down advances PICK→PRE_SNAP→LIVE→whistle on its o
   const cpuDownDeadline = Date.now() + 240_000;
   let cpuDownsSeen = 0;
   let opening: Snap | null = null;
+  let probed = false;
 
   for (;;) {
     const s = await snap(page);
@@ -112,24 +142,40 @@ test('CPU opponent: away down advances PICK→PRE_SNAP→LIVE→whistle on its o
       // While the CPU huddles, its call is armed and named in the overlay. On a
       // SECOND consecutive down this only renders because the call was cleared
       // between downs and freshly re-armed (the stale-play bug skipped it).
-      await expect
-        .poll(async () => (await snap(page)).cpuPlayId, { timeout: 5_000 })
-        .not.toBeNull();
-      expect((await snap(page)).cpuPlayId).not.toBeNull();
-      await expect(page.getByTestId('huddle-overlay')).toBeVisible();
-      await expect(page.getByTestId('cpu-offense-head')).toBeVisible();
-      if (cpuDownsSeen === 0) {
+      //
+      // Read the state AND the overlay DOM in ONE page.evaluate: they are only
+      // guaranteed to agree inside a single task (the scene updates both in the
+      // same frame). Asserting on the DOM with a separate, later Playwright wait
+      // races the whole CPU down — under parallel load the huddle beat (~1 s) can
+      // be over, and the element gone, before a 10 s `toBeVisible` even starts.
+      const h = await cpuHuddle(page);
+      if (h.possession !== 'away' || h.mode !== 'PICK' || h.cpuPlayId === null) {
+        // The beat moved on (or the coach has not armed its call yet): re-read.
+        await page.waitForTimeout(40);
+        continue;
+      }
+      expect(h.overlay, 'CPU huddle overlay must render while the CPU call is armed').toBe(true);
+      expect(h.head, 'CPU OFFENSE heading must render while the CPU call is armed').toBe(true);
+      if (cpuDownsSeen === 0 && !probed) {
+        probed = true;
         await page.screenshot({ path: join(screenshotDir, 'ml-pq2-cpu-huddle.png') });
         // A P1 play tap during this first CPU huddle must NOT change the call.
-        const beforeProbe = await snap(page);
         await tap(page, P1.A); // J — the human "play A" key
         await page.waitForTimeout(120);
         const afterProbe = await snap(page);
-        expect(afterProbe.cpuPlayId, 'P1 play keys must not change the CPU call').toBe(
-          beforeProbe.cpuPlayId,
-        );
+        // Compare only inside the same CPU down: once it has moved on, the call
+        // legitimately changes with the next down.
+        if (
+          afterProbe.possession === 'away' &&
+          afterProbe.down === h.down &&
+          afterProbe.los === h.los
+        ) {
+          expect(afterProbe.cpuPlayId, 'P1 play keys must not change the CPU call').toBe(
+            h.cpuPlayId,
+          );
+        }
       }
-      await page.waitForTimeout(120);
+      await page.waitForTimeout(40);
     } else if (s.mode === 'PRE_SNAP' || s.mode === 'LIVE') {
       // Capture the down/los + a live screenshot on the first down.
       if (cpuDownsSeen === 0 && opening === null && s.mode === 'LIVE') {

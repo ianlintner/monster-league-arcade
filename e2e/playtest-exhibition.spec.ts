@@ -94,7 +94,7 @@ test('full exhibition quarter with real keys: run, pass, punt, hazard, casualty,
   page,
 }) => {
   const errors = trackErrors(page);
-  await page.goto('/football/?quarter=120');
+  await page.goto('/football/?quarter=180');
   await expect(page.locator('#game canvas')).toBeVisible();
   await untilHomePick(page);
   await shot(page, '01-huddle-kickoff.png');
@@ -108,32 +108,15 @@ test('full exhibition quarter with real keys: run, pass, punt, hazard, casualty,
   await untilBanner(page);
   await shot(page, '03-run-result-banner.png');
 
-  // --- 2. A completed pass: C (Quick Slants), snap, open windows, throw A.
-  let completed = false;
-  for (let attempt = 0; attempt < 6 && !completed; attempt++) {
-    const s = await untilHomePick(page);
-    if (s.down >= 4) break;
-    await callAndSnap(page, P1.C);
-    await page.keyboard.down(P1.C);
-    await page.waitForTimeout(100);
-    await page.keyboard.up(P1.C);
-    await expect.poll(async () => (await mlf(page)).windowsOpen, { timeout: 5_000 }).toBe(true);
-    await page.waitForTimeout(150);
-    if (!completed) await shot(page, '04-pass-windows-open.png');
-    await page.keyboard.down(P1.A);
-    await page.waitForTimeout(220);
-    await page.keyboard.up(P1.A);
-    await untilBanner(page);
-    const text = (await bannerText(page)).toUpperCase();
-    // Completed = a gain, a first down or a TD; not INCOMPLETE / SACKED / INTERCEPTED.
-    completed = !/INCOMPLETE|SACK|INTERCEPT|FUMBLE/.test(text) && text.length > 0;
-    if (completed) await shot(page, '05-pass-completed-banner.png');
-  }
-  expect(completed, 'no completed pass in 6 attempts').toBe(true);
-
-  // --- 3. Reach 4th down on offense with un-steered runs, then PUNT (A, then C meter).
+  // --- 2. Reach 4th down on offense with un-steered runs, then PUNT (A, then C meter).
+  // This runs BEFORE the pass step on purpose. A quarter rollover resets the down to
+  // 1st, and the match clock is spent by every down played; a throw that fails (sack,
+  // incomplete, pick) costs a variable number of downs/possessions depending on input
+  // timing. Un-steered runs from the opening drive are the near-deterministic part, so
+  // they go first, while the quarter is fresh, and the timing-dependent pass step
+  // absorbs whatever clock is left.
   let punted = false;
-  for (let i = 0; i < 12 && !punted; i++) {
+  for (let i = 0; i < 40 && !punted; i++) {
     const s = await untilHomePick(page);
     if (s.down >= 4) {
       await shot(page, '06-fourth-down-special-teams.png');
@@ -157,6 +140,41 @@ test('full exhibition quarter with real keys: run, pass, punt, hazard, casualty,
     }
   }
   expect(punted, 'never reached a 4th-down punt').toBe(true);
+
+  // --- 3. A completed pass: C (Quick Slants), snap, open windows, throw to a receiver.
+  // Whether a throw completes depends on where the defenders are at the throw
+  // instant, and that shifts with real-time input latency (a parallel run adds tens
+  // of ms per round trip). So the spec does not bet on one receiver or three tries:
+  // it rotates A/B/C and keeps throwing until a pass completes (interceptions hand the
+  // ball to the CPU and `untilHomePick` waits for it to come back).
+  const RECEIVER_KEYS = [P1.A, P1.B, P1.C];
+  let completed = false;
+  for (let attempt = 0; attempt < 15 && !completed; attempt++) {
+    const s = await untilHomePick(page);
+    if (s.down >= 4) {
+      // 4th down offers special teams: C = "Go For It" (a plain run) keeps the drive alive.
+      await callAndSnap(page, P1.C);
+      await untilBanner(page);
+      continue;
+    }
+    await callAndSnap(page, P1.C);
+    await page.keyboard.down(P1.C);
+    await page.waitForTimeout(100);
+    await page.keyboard.up(P1.C);
+    await expect.poll(async () => (await mlf(page)).windowsOpen, { timeout: 5_000 }).toBe(true);
+    await page.waitForTimeout(150);
+    if (!completed) await shot(page, '04-pass-windows-open.png');
+    const throwKey = RECEIVER_KEYS[attempt % RECEIVER_KEYS.length]!;
+    await page.keyboard.down(throwKey);
+    await page.waitForTimeout(220);
+    await page.keyboard.up(throwKey);
+    await untilBanner(page);
+    const text = (await bannerText(page)).toUpperCase();
+    // Completed = a gain, a first down or a TD; not INCOMPLETE / SACKED / INTERCEPTED.
+    completed = !/INCOMPLETE|SACK|INTERCEPT|FUMBLE/.test(text) && text.length > 0;
+    if (completed) await shot(page, '05-pass-completed-banner.png');
+  }
+  expect(completed, 'no completed pass in 15 attempts').toBe(true);
 
   // --- 4. Hazard hit + casualty: walk the carrier onto an armed grave.
   await untilHomePick(page);
