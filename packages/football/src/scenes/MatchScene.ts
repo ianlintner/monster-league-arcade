@@ -45,6 +45,7 @@ import {
 import { ActorPresenter, type PresentScene } from './actorPresenter';
 import { installDebugHandle, type DebugHandleSurface } from './debugHandle';
 import { MatchController } from './matchController';
+import { cpuOnOffense } from './cpuOpponent';
 import { quarterSecondsFromSearch } from './matchConfig';
 
 export const CANVAS_WIDTH = 640;
@@ -410,7 +411,13 @@ export class MatchScene extends Phaser.Scene {
       // the pick so the down proceeds.
       if (penalty?.kind === 'DELAY_OF_GAME') {
         if (this.mode === 'PICK') {
-          this.match.confirmPlay(this.selectedPlayIndex);
+          // CPU offense: a delay-of-game during the CPU huddle must NOT force a
+          // human-catalog pick — the CPU calls its own play on its own beat. The
+          // penalty yards are already applied by `tickPlayClock`; the AI coach will
+          // call the next down from the backed-up spot.
+          if (!cpuOnOffense(this.session)) {
+            this.match.confirmPlay(this.selectedPlayIndex);
+          }
         } else if (this.mode === 'PRE_SNAP') {
           // The penalty moved `session.los` back 5 yards, but the formation was
           // built at pick time from the old LOS. Rebuild it so the actors, ball

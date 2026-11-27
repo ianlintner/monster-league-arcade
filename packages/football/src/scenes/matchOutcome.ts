@@ -179,6 +179,14 @@ export function updateBanner(s: MatchRuntime, dt: number): void {
   s.liveResult = null;
   s.gameOver = s.session.phase === 'GAME_OVER';
   s.mode = s.gameOver ? 'BANNER' : 'PICK';
+  // A completed down must forget the CPU's call so the next CPU down re-runs the
+  // AI coach fresh (correct PUNT/FIELD_GOAL on 4th, rebuilt "CPU OFFENSE"
+  // overlay, restored huddle beat). Leaving `cpuPlayId` set would make
+  // `updatePick` confirm the stale play id immediately on the next down.
+  s.cpuPlayId = null;
+  s.cpuHuddleClock = 0;
+  s.cpuSnapClock = 0;
+  s.cpuPassClock = 0;
   // A terminal game swaps the play banner for the final-result card (inside the
   // viewport) and pins it; a short lockout guards against an accidental restart.
   if (s.gameOver) {

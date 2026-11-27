@@ -30,11 +30,18 @@ describe('CPU play-call adapter (cpuOpponent)', () => {
     expect(sit.los).toBe(30);
   });
 
-  it('calls a run on 1st & 10 in open field', () => {
+  it('passes on 1st & 10 in open field (long yardage)', () => {
     const g = awaySession(30, 1, 10);
     const d = cpuCallOffense(g);
-    expect(d.offensePlayId).not.toBe('');
-    expect(['RUN', 'PASS']).toContain(getOffensePlay(d.offensePlayId).kind);
+    expect(d.offensePlayId).toBe('POST_CORNER');
+    expect(getOffensePlay(d.offensePlayId).kind).toBe('PASS');
+  });
+
+  it('calls a run on mid yardage where the mix lands on the ground game', () => {
+    const g = awaySession(30, 1, 6);
+    const d = cpuCallOffense(g);
+    expect(d.offensePlayId).toBe('DRAW_OF_DOOM');
+    expect(getOffensePlay(d.offensePlayId).kind).toBe('RUN');
   });
 
   it('calls a pass on 3rd & long', () => {

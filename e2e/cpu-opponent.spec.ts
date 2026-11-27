@@ -77,47 +77,74 @@ test('CPU opponent: away down advances PICK→PRE_SNAP→LIVE→whistle on its o
     }
   }
 
-  // ---- Observe the CPU drive a full down with no keys pressed. ---------------
-  // The CPU huddle overlay names its play instead of the A/B/C pick list.
+  // ---- Observe the CPU drive its possession with no keys pressed. -------------
+  // The CPU huddle overlay names its play instead of the A/B/C pick list. We
+  // watch EVERY CPU down (not just the first) so a second consecutive CPU down —
+  // the exact path the stale-play bug broke — is exercised whenever the drive
+  // does not end on the first snap. On every down the CPU re-arms a fresh call,
+  // shows the huddle beat, then runs PICK→PRE_SNAP→LIVE→whistle on its own.
   await expect.poll(async () => (await snap(page)).mode, { timeout: 10_000 }).toBe('PICK');
-  const cpuHuddleSnap = await snap(page);
-  expect(cpuHuddleSnap.possession).toBe('away');
-  expect(cpuHuddleSnap.cpuPlayId).not.toBeNull();
-  await expect(page.getByTestId('huddle-overlay')).toBeVisible();
-  await expect(page.getByTestId('cpu-offense-head')).toBeVisible();
-  await page.screenshot({ path: join(screenshotDir, 'ml-pq2-cpu-huddle.png') });
 
-  // A P1 J tap during the CPU huddle must NOT change the called play (the CPU
-  // plays itself; the human A/B/C never feeds the CPU's call).
-  const beforeProbe = await snap(page);
-  await tap(page, P1.A); // J — the human "play A" key
-  await page.waitForTimeout(120);
-  const afterProbe = await snap(page);
-  expect(afterProbe.cpuPlayId, 'P1 play keys must not change the CPU call').toBe(
-    beforeProbe.cpuPlayId,
-  );
+  const cpuDownDeadline = Date.now() + 240_000;
+  let cpuDownsSeen = 0;
+  let opening: Snap | null = null;
 
-  // The CPU snaps on its own, plays LIVE with no steer, and reaches the whistle.
-  // Capture the CPU's opening down/los BEFORE the play advances (still in PICK).
-  const opening = await snap(page);
-  const downBefore = opening.down;
-  const losBefore = opening.los;
-  await expect.poll(async () => (await snap(page)).mode, { timeout: 15_000 }).toBe('PRE_SNAP');
-  // The human C (snap) must not be required: wait for LIVE without touching C.
-  await expect.poll(async () => (await snap(page)).mode, { timeout: 15_000 }).toBe('LIVE');
-  // Capture the CPU live down for the readability screenshot.
-  await expect.poll(async () => (await snap(page)).carrierId, { timeout: 5_000 }).not.toBeNull();
-  await page.screenshot({ path: join(screenshotDir, 'ml-pq2-cpu-live.png') });
+  for (;;) {
+    const s = await snap(page);
+    expect(Date.now(), 'CPU drive never finished in time').toBeLessThan(cpuDownDeadline);
 
-  // The down runs to the whistle and the session advances on its own.
-  await expect.poll(async () => (await snap(page)).mode, { timeout: 20_000 }).toBe('BANNER');
-  // After the banner, possession flips back to home and down/los have advanced.
-  await expect.poll(async () => (await snap(page)).mode, { timeout: 15_000 }).toBe('PICK');
-  const afterWhistle = await snap(page);
-  expect(afterWhistle.possession).not.toBe('away');
-  // `down` advanced unless the CPU scored (then it resets to 1 via kickoff) —
-  // either way the session state changed from the pre-snap reading.
-  expect(afterWhistle.down !== downBefore || afterWhistle.los !== losBefore).toBe(true);
+    // The CPU's turn is over once possession flips back to the human.
+    if (s.possession !== 'away') break;
+
+    if (s.mode === 'PICK') {
+      // While the CPU huddles, its call is armed and named in the overlay. On a
+      // SECOND consecutive down this only renders because the call was cleared
+      // between downs and freshly re-armed (the stale-play bug skipped it).
+      expect(s.cpuPlayId).not.toBeNull();
+      await expect(page.getByTestId('huddle-overlay')).toBeVisible();
+      await expect(page.getByTestId('cpu-offense-head')).toBeVisible();
+      if (cpuDownsSeen === 0) {
+        await page.screenshot({ path: join(screenshotDir, 'ml-pq2-cpu-huddle.png') });
+        // A P1 play tap during this first CPU huddle must NOT change the call.
+        const beforeProbe = await snap(page);
+        await tap(page, P1.A); // J — the human "play A" key
+        await page.waitForTimeout(120);
+        const afterProbe = await snap(page);
+        expect(afterProbe.cpuPlayId, 'P1 play keys must not change the CPU call').toBe(
+          beforeProbe.cpuPlayId,
+        );
+      }
+      await page.waitForTimeout(120);
+    } else if (s.mode === 'PRE_SNAP' || s.mode === 'LIVE') {
+      // Capture the down/los + a live screenshot on the first down.
+      if (cpuDownsSeen === 0 && opening === null && s.mode === 'LIVE') {
+        await expect
+          .poll(async () => (await snap(page)).carrierId, { timeout: 5_000 })
+          .not.toBeNull();
+        await page.screenshot({ path: join(screenshotDir, 'ml-pq2-cpu-live.png') });
+        opening = s;
+      }
+      // No key pressed: the CPU snaps and plays LIVE on its own.
+      await page.waitForTimeout(150);
+    } else if (s.mode === 'BANNER') {
+      // The whistle fired: a CPU down completed. Record it and keep watching if
+      // the CPU retained possession (a second consecutive down).
+      cpuDownsSeen += 1;
+      await page.waitForTimeout(150);
+    } else {
+      await page.waitForTimeout(150);
+    }
+  }
+
+  // The CPU ran at least one full down to a whistle on its own, with zero keys.
+  expect(cpuDownsSeen, 'CPU must complete at least one autonomous down').toBeGreaterThanOrEqual(1);
+
+  // After the CPU drive, possession is back with the human and the session has
+  // advanced from the opening snap (down/los changed, or a score reset to 1).
+  if (opening) {
+    const after = await snap(page);
+    expect(after.down !== opening.down || after.los !== opening.los).toBe(true);
+  }
 
   expect(errors).toEqual([]);
 });
