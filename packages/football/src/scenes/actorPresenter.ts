@@ -340,14 +340,6 @@ export class ActorPresenter {
     if (cell.flipX) sp.setFlipX(true);
     scene.actorsLayer.add(sp);
 
-    if (a.isHighlighted) {
-      const ring = scene.add
-        .ellipse(a.px, a.py, 22 * a.scale, 22 * a.scale, undefined, 0)
-        .setStrokeStyle(1, toPhaserColor('SPECTRAL_CYAN'), 1)
-        .setDepth(a.depth - 0.5);
-      scene.actorsLayer.add(ring);
-    }
-
     const shadow = scene.add.ellipse(a.px, a.py, 18 * a.scale, 6 * a.scale, 0x000000, 0.35);
     shadow.setDepth(a.depth - 0.5);
     scene.actorsLayer.add(shadow);
@@ -433,12 +425,19 @@ export class ActorPresenter {
       g.lineBetween(fdTop.x, fdTop.y, fdBot.x, fdBot.y);
     }
 
+    // The user-controlled defender (CPU has the ball) gets the same ring/arrow.
+    const controlled = actors.find((a) => a.isHighlighted);
+    if (controlled) this.drawControlRing(g, controlled);
+
     const carrier = actors.find((a) => a.isCarrier);
     if (!carrier) return;
+    this.drawStar(g, carrier.px, carrier.py + 4);
+    this.drawControlRing(g, carrier);
+  }
 
-    const { state, px, py } = carrier;
-    this.drawStar(g, px, py + 4);
-
+  /** Ground ring, heading arrow and stamina arc for a user-controlled actor. */
+  private drawControlRing(g: PresentScene['groundGfx'], a: RenderActor): void {
+    const { state, px, py } = a;
     const r = 16;
     g.lineStyle(2, toPhaserColor('SPECTRAL_CYAN'), 0.9);
     g.strokeEllipse(px, py - 8, r, r * 0.7);
