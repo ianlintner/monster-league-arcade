@@ -21,15 +21,9 @@ import { GameSession, type AudibleController, type Button, type NastyKind } from
 import { resetNotice, resetRouter, type NastyNoticeKind } from './preSnapRouter';
 import { drawFieldSprites, drawField, drawHazards, hazardStateKey } from './fieldRenderer';
 import type { DrawSurface } from './fieldRenderer';
-import {
-  stepCamera,
-  clampFocus,
-  INITIAL_CAMERA,
-  INITIAL_SHAKE,
-  cameraShakeOffset,
-  prefersReducedMotion,
-} from './cameraRig';
+import { INITIAL_CAMERA, INITIAL_SHAKE } from './cameraRig';
 import type { CameraState, CameraShake } from './cameraRig';
+import { presentCamera } from './cameraPresenter';
 import {
   composeReadyLine,
   updateScorebug,
@@ -55,7 +49,7 @@ import { ActorPresenter, type PresentScene } from './actorPresenter';
 import { installDebugHandle, type DebugHandleSurface } from './debugHandle';
 import { MatchController } from './matchController';
 import { cpuOnOffense } from './cpuOpponent';
-import { quarterSecondsFromSearch } from './matchConfig';
+import { quarterSecondsFromSearch, casualtiesFromSearch } from './matchConfig';
 import { mountOnboarding, type Onboarding } from '../ui/onboarding';
 import { MatchAudio, type AudioSink } from './matchAudio';
 
@@ -379,6 +373,7 @@ export class MatchScene extends Phaser.Scene {
       homeFaction: 'REAPERS',
       awayFaction: 'DEADSKINS',
       quarterSeconds: quarterSecondsFromSearch(window.location.search),
+      initialCasualties: casualtiesFromSearch(window.location.search),
     });
     session.coinToss('home');
     session.kickoff({ touchback: true });
@@ -438,7 +433,6 @@ export class MatchScene extends Phaser.Scene {
       return;
     }
     const dt = Math.min(delta, 50) / 1000;
-    this.renderDt = dt;
     this.sampleInput(dt);
 
     // Advance the play clock (and, while running, the between-play game clock).
@@ -475,8 +469,7 @@ export class MatchScene extends Phaser.Scene {
     this.audio.tick(this.mode);
     // LivePlay owns the *only* hit-stop clock. Freeze actor animation frames while
     // it is active so a tackle reads as a real impact, not a sprite shuffle.
-    const frozen = (this.live?.snapshot().actors ?? []).some((a) => a.hitStop > 0);
-    this.renderDt = frozen ? 0 : dt;
+    this.renderDt = (this.live?.snapshot().actors ?? []).some((a) => a.hitStop > 0) ? 0 : dt;
     const actors = this.actorPresenter.renderActors(this.renderContext());
     this.spriteBackedActorCount = actors.spriteBackedActorCount;
     this.carrierScreen = actors.carrierScreen;
@@ -495,23 +488,13 @@ export class MatchScene extends Phaser.Scene {
    *  zoom + scroll on `cameras.main` so every world object (turf, lines, actors,
    *  overlays) transforms together without a per-projection rewrite. */
   private updateCamera(dt: number): void {
-    this.camera = stepCamera(this.camera, {
+    this.camera = presentCamera(this.cameras.main, this.camera, this.shake, {
       dt,
       ballFlight: this.ballFlight,
       carrier: this.live?.carrier ?? null,
       los: this.liveLos,
       isPassPlay: this.isPassPlay,
     });
-
-    const cam = this.cameras.main;
-    cam.setZoom(this.camera.zoom);
-    // Clamp the focus to the arena so the view never pans into the VOID_BLACK
-    // surround at the end zones / sidelines (see cameraRig.clampFocus).
-    const focus = clampFocus(this.camera);
-    // Hit-reaction offset is added to the centred focus, never to the tracked
-    // state, so the lerp continues toward the real ball and cannot drift away.
-    const shake = cameraShakeOffset(this.shake, dt, prefersReducedMotion());
-    cam.centerOn(focus.x + shake.x, focus.y + shake.y);
   }
 
   // ------------------------------------------------------------- inputs

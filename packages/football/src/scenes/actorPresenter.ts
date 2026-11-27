@@ -252,18 +252,13 @@ export class ActorPresenter {
       if (c.label) {
         const hex = `#${toPhaserColor('VAMPIRE_CRIMSON').toString(16).padStart(6, '0')}`;
         const t = scene.add
-          .text(
-            Math.max(112, Math.min(CANVAS_WIDTH - 112, c.x)),
-            Math.max(48, c.y - 26),
-            c.label,
-            {
-              fontFamily: '"Press Start 2P", monospace',
-              fontSize: '10px',
-              color: hex,
-              stroke: '#0B0711',
-              strokeThickness: 3,
-            },
-          )
+          .text(Math.max(112, Math.min(CANVAS_WIDTH - 112, c.x)), Math.max(48, c.y - 26), c.label, {
+            fontFamily: '"Press Start 2P", monospace',
+            fontSize: '10px',
+            color: hex,
+            stroke: '#0B0711',
+            strokeThickness: 3,
+          })
           .setOrigin(0.5, 1)
           .setAlpha(a)
           .setDepth(301);
