@@ -844,3 +844,75 @@ body.gsn-crt-on .gsn-crt-overlay {
   font-family: var(--gsn-font-terminal);
   color: var(--gsn-ecto-green);
 }
+
+/* ── Football onboarding: in-viewport prompt strip + first-run controls card ── */
+
+.gsn-onboard-prompt {
+  position: fixed;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  z-index: 900;
+  max-width: calc(100vw - 16px);
+  padding: 6px 12px;
+  font-family: var(--gsn-font-pixel);
+  font-size: 12px;
+  line-height: 1.3;
+  text-align: center;
+  color: var(--gsn-bone-white);
+  background: var(--gsn-void-black);
+  border: 2px solid var(--gsn-hex-purple);
+  pointer-events: none;
+}
+
+.gsn-controls-card {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1000;
+  width: min(560px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  padding: 16px 20px;
+  font-family: var(--gsn-font-ui);
+  font-size: 15px;
+  color: var(--gsn-bone-white);
+  background: var(--gsn-crypt-slate);
+  border: 3px solid var(--gsn-pumpkin-orange);
+  box-shadow: 0 0 0 2px var(--gsn-void-black);
+}
+
+.gsn-controls-card__title {
+  margin: 0 0 8px;
+  font-family: var(--gsn-font-display);
+  font-size: 16px;
+  color: var(--gsn-pumpkin-orange);
+}
+
+.gsn-controls-card p {
+  margin: 6px 0;
+}
+
+.gsn-controls-card__keys {
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gsn-controls-card__keys li {
+  margin: 3px 0;
+}
+
+.gsn-controls-card__keys b {
+  display: inline-block;
+  min-width: 80px;
+  color: var(--gsn-spectral-cyan);
+}
+
+.gsn-controls-card__dismiss {
+  margin-top: 12px;
+  text-align: center;
+  font-family: var(--gsn-font-pixel);
+  color: var(--gsn-ecto-green);
+}

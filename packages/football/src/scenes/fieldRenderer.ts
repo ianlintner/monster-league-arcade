@@ -167,6 +167,30 @@ export function drawField(g: DrawSurface): void {
   // goal line and rotated none — they stand up out of the field.
   drawGoalpost(g, projectToScreen(0.5, 26.5));
   drawGoalpost(g, projectToScreen(119.5, 26.5));
+
+  drawAttackArrows(g);
+}
+
+/** Attack-direction cue: every drive runs +x (toward the right end zone, whichever
+ *  team has the ball), so paint chevrons ahead of each 10-yard line pointing right
+ *  and a bold arrow in the target end zone. Static, drawn once with the field. */
+function drawAttackArrows(g: DrawSurface): void {
+  const color = toPhaserColor('ECTO_GREEN');
+  const chevron = (x: number, y: number, size: number, alpha: number) => {
+    const tip = projectToScreen(x + size, y);
+    const top = projectToScreen(x, y - size * 0.9);
+    const bot = projectToScreen(x, y + size * 0.9);
+    g.lineStyle(2, color, alpha);
+    g.lineBetween(top.x, top.y, tip.x, tip.y);
+    g.lineBetween(bot.x, bot.y, tip.x, tip.y);
+  };
+  for (const x of [25, 35, 45, 55, 65, 75, 85, 95]) chevron(x, 26.5, 2, 0.35);
+  // End-zone arrow: shaft + head at the centre of the target end zone.
+  const tail = projectToScreen(112, 26.5);
+  const head = projectToScreen(118, 26.5);
+  g.lineStyle(3, color, 0.85);
+  g.lineBetween(tail.x, tail.y, head.x, head.y);
+  chevron(115.5, 26.5, 2.5, 0.85);
 }
 
 function perspectiveQuad(
