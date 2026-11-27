@@ -272,6 +272,57 @@ function bannerTitle(kind: BannerKind): string {
   }
 }
 
+/** The terminal-match result screen (winner, final score, reason, restart hint).
+ *  Reuses the GSN 66.6 banner chrome but presents a full-width final-result card
+ *  that stays inside the 1280×720 fold — the dead-end the playability audit
+ *  flagged (banner below fold, START/C doing nothing at GAME_OVER). */
+export interface ResultState {
+  winner: 'home' | 'away' | null;
+  homeScore: number;
+  awayScore: number;
+  homeName: string;
+  awayName: string;
+  /** 'SCORE' | 'TIE' | 'FORFEIT_BY_CARNAGE' — drives the reason line. */
+  reason: 'SCORE' | 'TIE' | 'FORFEIT_BY_CARNAGE' | null;
+  /** The team that forfeited (lost all monsters), else null. */
+  forfeitLoser: 'home' | 'away' | null;
+}
+
+/** Compose the one-line reason for the result screen (FINAL vs forfeit detail). */
+export function resultReasonLine(s: ResultState): string {
+  if (s.reason === 'FORFEIT_BY_CARNAGE') {
+    const loser = s.forfeitLoser === 'home' ? s.homeName : s.awayName;
+    return `FORFEIT BY CARNAGE — ${loser} lost ${CARNAGE_LIMIT} monsters`;
+  }
+  return 'FINAL';
+}
+
+/** Build the final-result card shown at GAME_OVER. */
+export function buildResultCard(s: ResultState): HTMLElement {
+  const card = el('div', 'gsn-result');
+  card.setAttribute('data-testid', 'result-card');
+  card.setAttribute('data-winner', s.winner ?? 'tie');
+
+  const head = el('span', 'gsn-result__head');
+  head.textContent =
+    s.winner === null ? 'FINAL — TIE' : `${s.winner === 'home' ? s.homeName : s.awayName} WINS!`;
+
+  const score = el('span', 'gsn-result__score');
+  score.setAttribute('data-testid', 'result-score');
+  score.textContent = `${s.homeName} ${s.homeScore} — ${s.awayScore} ${s.awayName}`;
+
+  const reason = el('span', 'gsn-result__reason');
+  reason.setAttribute('data-testid', 'result-reason');
+  reason.textContent = resultReasonLine(s);
+
+  const hint = el('span', 'gsn-result__hint');
+  hint.setAttribute('data-testid', 'result-hint');
+  hint.textContent = 'PRESS [START=P] OR [C=L] TO RESTART';
+
+  card.append(head, score, reason, hint);
+  return card;
+}
+
 /** Classify a `GameSession.bannerFor` headline into a broadcast banner kind. */
 export function bannerKindForText(text: string): BannerKind {
   const t = text.toUpperCase();

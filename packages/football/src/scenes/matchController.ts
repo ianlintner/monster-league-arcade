@@ -138,6 +138,8 @@ export interface MatchRuntime {
   releasedBtn(b: ArcadeButton): boolean;
   steerLeftEdge(): boolean;
   steerRightEdge(): boolean;
+  /** Start a fresh match from the terminal result screen. */
+  restartMatch(): void;
 }
 
 /** The live-play mode state machine, operating on a `MatchRuntime`. */

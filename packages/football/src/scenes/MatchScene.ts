@@ -45,6 +45,7 @@ import {
 import { ActorPresenter, type PresentScene } from './actorPresenter';
 import { installDebugHandle, type DebugHandleSurface } from './debugHandle';
 import { MatchController } from './matchController';
+import { quarterSecondsFromSearch } from './matchConfig';
 
 export const CANVAS_WIDTH = 640;
 export const CANVAS_HEIGHT = 360;
@@ -281,14 +282,7 @@ export class MatchScene extends Phaser.Scene {
     // listeners are released when the scene shuts down or restarts.
     this.events.once('shutdown', () => this.inputManager.detach());
 
-    // Bootstrap a session to the first huddle: home receives the opening kick.
-    this.session = new GameSession({
-      seed: 1993,
-      homeFaction: 'REAPERS',
-      awayFaction: 'DEADSKINS',
-    });
-    this.session.coinToss('home');
-    this.session.kickoff({ touchback: true });
+    this.session = this.newSession();
 
     // Home wears home, away wears away. Resolve sheets once from the rosters.
     this.homeSheet = FACTION_SHEET[this.session.roster.home.faction];
@@ -330,6 +324,58 @@ export class MatchScene extends Phaser.Scene {
     if (MatchScene.isProduction) this.readyText.setVisible(false);
 
     this.refreshUi();
+  }
+
+  /** Bootstrap a session to the first huddle: home receives the opening kick.
+   *  `?quarter=<seconds>` (clamped 10..180) is a test seam for short matches. */
+  private newSession(): GameSession {
+    const session = new GameSession({
+      seed: 1993,
+      homeFaction: 'REAPERS',
+      awayFaction: 'DEADSKINS',
+      quarterSeconds: quarterSecondsFromSearch(window.location.search),
+    });
+    session.coinToss('home');
+    session.kickoff({ touchback: true });
+    return session;
+  }
+
+  /** Start a fresh match from the result screen: new session, presentation state
+   *  cleared, huddle shown. Stays in the same scene, so `InputManager` keeps its
+   *  single window listener (nothing to detach/reattach, no doubled handlers). */
+  restartMatch(): void {
+    this.session = this.newSession();
+    this.mode = 'PICK';
+    this.live = null;
+    this.liveResult = null;
+    this.gameOver = false;
+    this.selectedPlayIndex = 0;
+    this.bannerText = '';
+    this.bannerKind = 'NEUTRAL';
+    this.bannerTimer = 0;
+    this.highlightDefender = -1;
+    this.isPassPlay = false;
+    this.isKickPlay = false;
+    this.kickLocked = null;
+    this.windowsOpen = false;
+    this.ballFlight = null;
+    this.ballHolderId = null;
+    this.gasCloud = null;
+    this.passingUntil = -1;
+    this.pendingHazardHits = [];
+    this.damagePopups = [];
+    this.casualties = [];
+    this.looseBall = null;
+    this.liveLos = this.session.los;
+    this.runDist.clear();
+    this.lastPos.clear();
+    this.animClock.clear();
+    this.animKind.clear();
+    this.presentation.clear();
+    this.camera = { ...INITIAL_CAMERA };
+    // Force the huddle overlay to rebuild and drop the result card.
+    this.huddleFingerprint = '';
+    document.getElementById('banner')?.replaceChildren();
   }
 
   override update(_time: number, delta: number): void {

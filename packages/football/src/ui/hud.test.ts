@@ -5,7 +5,9 @@ import {
   buildBroadcastBanner,
   buildControlsBar,
   buildHuddleOverlay,
+  buildResultCard,
   buildScorebug,
+  resultReasonLine,
   downDistanceLabel,
   losLabel,
 } from './hud';
@@ -163,6 +165,46 @@ describe('Broadcast banners', () => {
     for (const [text, expected] of cases) {
       expect(bannerKindForText(text), `"${text}"`).toBe(expected);
     }
+  });
+});
+
+describe('Result card', () => {
+  const base = {
+    winner: 'home' as const,
+    homeScore: 14,
+    awayScore: 7,
+    homeName: 'REAPERS',
+    awayName: 'DEADSKINS',
+    reason: 'SCORE' as const,
+    forfeitLoser: null,
+  };
+
+  it('shows winner, final score, FINAL reason and the restart hint', () => {
+    const el = buildResultCard(base);
+    expect(el.querySelector('.gsn-result__head')?.textContent).toBe('REAPERS WINS!');
+    expect(el.querySelector('[data-testid="result-score"]')?.textContent).toBe(
+      'REAPERS 14 — 7 DEADSKINS',
+    );
+    expect(el.querySelector('[data-testid="result-reason"]')?.textContent).toBe('FINAL');
+    expect(el.querySelector('[data-testid="result-hint"]')?.textContent).toContain('START=P');
+  });
+
+  it('names the forfeiting team when the match ends by carnage', () => {
+    const s = {
+      ...base,
+      winner: 'away' as const,
+      reason: 'FORFEIT_BY_CARNAGE' as const,
+      forfeitLoser: 'home' as const,
+    };
+    expect(resultReasonLine(s)).toBe(`FORFEIT BY CARNAGE — REAPERS lost ${CARNAGE_LIMIT} monsters`);
+    expect(buildResultCard(s).querySelector('.gsn-result__head')?.textContent).toBe(
+      'DEADSKINS WINS!',
+    );
+  });
+
+  it('reports a tie without a winner', () => {
+    const el = buildResultCard({ ...base, winner: null, reason: 'TIE' });
+    expect(el.querySelector('.gsn-result__head')?.textContent).toBe('FINAL — TIE');
   });
 });
 

@@ -9,7 +9,7 @@ import type { GameSession, HazardHit } from '../sim/index';
 import { projectActor } from '../field/fieldMapper';
 import { projectToScreen, toPhaserColor } from '@monster-league/shared-core';
 import { detailForKind, type MatchRuntime } from './matchController';
-import { bannerKindForText, buildBroadcastBanner } from '../ui/hud';
+import { bannerKindForText, buildBroadcastBanner, buildResultCard } from '../ui/hud';
 import { resolveScrambleOutcome } from '../field/PlayOrchestrator';
 
 /** Show the play-over banner and enter the BANNER presentation state. */
@@ -143,8 +143,14 @@ export function commitOutcome(s: MatchRuntime): void {
 }
 
 export function updateBanner(s: MatchRuntime, dt: number): void {
-  // Terminal game: keep showing the final banner; no dismiss/period logic runs.
-  if (s.gameOver) return;
+  // Terminal game: the result card stays up; START (P) or C (L) starts a fresh
+  // match once the short lockout lapses (so a stray tap from the final play
+  // cannot skip the result).
+  if (s.gameOver) {
+    s.bannerTimer -= dt;
+    if (s.bannerTimer <= 0 && (s.pressedBtn('START') || s.pressedBtn('C'))) s.restartMatch();
+    return;
+  }
   s.bannerTimer -= dt;
   if (s.bannerTimer > 0) return;
 
@@ -173,6 +179,31 @@ export function updateBanner(s: MatchRuntime, dt: number): void {
   s.liveResult = null;
   s.gameOver = s.session.phase === 'GAME_OVER';
   s.mode = s.gameOver ? 'BANNER' : 'PICK';
-  // A terminal game pins the banner: it no longer runs dismiss logic (the while
-  // loop below is skipped), and refreshUi() mirrors the final phase/winners.
+  // A terminal game swaps the play banner for the final-result card (inside the
+  // viewport) and pins it; a short lockout guards against an accidental restart.
+  if (s.gameOver) {
+    s.bannerTimer = RESTART_LOCKOUT_SECONDS;
+    renderResultCard(s);
+  }
+}
+
+/** Seconds the result card ignores restart input after it appears. */
+const RESTART_LOCKOUT_SECONDS = 0.6;
+
+/** Replace the `#banner` content with the final-result card. */
+function renderResultCard(s: MatchRuntime): void {
+  const host = document.getElementById('banner');
+  if (!host) return;
+  const { winner, endReason, forfeitLoser, score, roster } = s.session;
+  host.replaceChildren(
+    buildResultCard({
+      winner,
+      homeScore: score.home,
+      awayScore: score.away,
+      homeName: roster.home.faction,
+      awayName: roster.away.faction,
+      reason: endReason,
+      forfeitLoser,
+    }),
+  );
 }
