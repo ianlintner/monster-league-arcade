@@ -21,8 +21,7 @@ import { GameSession, type AudibleController, type Button, type NastyKind } from
 import { resetNotice, resetRouter, type NastyNoticeKind } from './preSnapRouter';
 import { drawFieldSprites, drawField, drawHazards, hazardStateKey } from './fieldRenderer';
 import type { DrawSurface } from './fieldRenderer';
-import { INITIAL_CAMERA, INITIAL_SHAKE } from './cameraRig';
-import type { CameraState, CameraShake } from './cameraRig';
+import { INITIAL_CAMERA, INITIAL_SHAKE, type CameraState, type CameraShake } from './cameraRig';
 import { presentCamera } from './cameraPresenter';
 import {
   composeReadyLine,
@@ -32,7 +31,7 @@ import {
   syncHuddle,
   syncNastyOverlay,
 } from './hudBridge';
-import type { LivePlay, LivePlayResult } from '../field/LivePlay';
+import { animationDelta, type LivePlay, type LivePlayResult } from '../field/LivePlay';
 import { HazardManager } from '../field/HazardManager';
 import type { NastyFieldEffects } from '../field/NastyFieldEffects';
 import type { HazardHit } from '../sim/GameSession';
@@ -47,7 +46,7 @@ import {
 } from './spriteRenderer';
 import { ActorPresenter, type PresentScene } from './actorPresenter';
 import { installDebugHandle, type DebugHandleSurface } from './debugHandle';
-import { MatchController } from './matchController';
+import { MatchController, resetMatchPresentation } from './matchController';
 import { cpuOnOffense } from './cpuOpponent';
 import { quarterSecondsFromSearch, casualtiesFromSearch } from './matchConfig';
 import { mountOnboarding, type Onboarding } from '../ui/onboarding';
@@ -253,8 +252,7 @@ export class MatchScene extends Phaser.Scene {
 
   constructor() {
     super('match');
-    // The controller holds a back-reference to this scene through `MatchRuntime`;
-    // construct it before exposing the debug handle (which drives the same surface).
+    // The controller holds a scene back-reference; construct before the debug handle.
     this.match = new MatchController(this);
     // Expose the e2e/dev handle as soon as the scene object exists, not in
     // `create()`: Phaser makes the canvas visible at the *start* of `preload`,
@@ -421,6 +419,7 @@ export class MatchScene extends Phaser.Scene {
     this.animKind.clear();
     this.presentation.clear();
     this.camera = { ...INITIAL_CAMERA };
+    resetMatchPresentation(this);
     // Force the huddle overlay to rebuild and drop the result card.
     this.huddleFingerprint = '';
     document.getElementById('banner')?.replaceChildren();
@@ -467,9 +466,8 @@ export class MatchScene extends Phaser.Scene {
 
     this.match.updateMode(dt);
     this.audio.tick(this.mode);
-    // LivePlay owns the *only* hit-stop clock. Freeze actor animation frames while
-    // it is active so a tackle reads as a real impact, not a sprite shuffle.
-    this.renderDt = (this.live?.snapshot().actors ?? []).some((a) => a.hitStop > 0) ? 0 : dt;
+    // LivePlay owns the only hit-stop clock; freeze animation frames while it runs.
+    this.renderDt = animationDelta(dt, this.live?.isHitStopActive() ?? false);
     const actors = this.actorPresenter.renderActors(this.renderContext());
     this.spriteBackedActorCount = actors.spriteBackedActorCount;
     this.carrierScreen = actors.carrierScreen;

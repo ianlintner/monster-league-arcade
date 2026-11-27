@@ -3,8 +3,10 @@ import {
   INITIAL_SHAKE,
   SHAKE_STRENGTH,
   cameraShakeOffset,
+  focusWithShake,
   kickShake,
   type CameraShake,
+  type CameraState,
 } from './cameraRig';
 
 const fresh = (): CameraShake => ({ ...INITIAL_SHAKE });
@@ -47,5 +49,19 @@ describe('camera shake', () => {
     expect(cameraShakeOffset(shake, 1 / 60, true)).toEqual({ x: 0, y: 0 });
     expect(shake.amplitude).toBe(0);
     expect(cameraShakeOffset(shake, 1 / 60, false)).toEqual({ x: 0, y: 0 });
+  });
+});
+
+describe('shaken camera focus', () => {
+  it('clamps after adding shake so an edge impact cannot reveal the surround', () => {
+    const zoom = 2.2;
+    const halfW = 640 / (2 * zoom);
+    const atLeftEdge: CameraState = { x: halfW, y: 180, zoom };
+
+    expect(focusWithShake(atLeftEdge, { x: -20, y: 12 })).toEqual({ x: halfW, y: 192 });
+    expect(focusWithShake({ x: 320, y: 180, zoom }, { x: 5, y: -7 })).toEqual({
+      x: 325,
+      y: 173,
+    });
   });
 });

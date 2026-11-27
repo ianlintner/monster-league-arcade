@@ -16,7 +16,7 @@ import type { HazardManager } from '../field/HazardManager';
 import { NastyFieldEffects } from '../field/NastyFieldEffects';
 import type { BannerKind } from '../ui/hud';
 import type { ActorAnimation, ActorPresentationState } from './spriteRenderer';
-import type { CameraShake } from './cameraRig';
+import { INITIAL_SHAKE, type CameraShake } from './cameraRig';
 import { updateLive, commitPass } from './matchSim';
 import { settleExpiredPeriod, updateBanner } from './matchOutcome';
 import { CPU_TEAM, cpuOnOffense, cpuCallOffense } from './cpuOpponent';
@@ -171,6 +171,15 @@ export interface MatchRuntime extends PreSnapRuntime {
   steerRightEdge(): boolean;
   /** Start a fresh match from the terminal result screen. */
   restartMatch(): void;
+}
+
+/** Clear state that belongs to one match only when the result screen restarts
+ *  in the *same* scene. `forfeitWarned` is a per-match set; without this a team
+ *  warned in the previous game never hears the buzzer in the rematch. The
+ *  impact shake is dropped too, so no stale hit carries into the new kickoff. */
+export function resetMatchPresentation(s: MatchRuntime): void {
+  s.forfeitWarned.clear();
+  s.shake = { ...INITIAL_SHAKE };
 }
 
 /** The live-play mode state machine, operating on a `MatchRuntime`. */

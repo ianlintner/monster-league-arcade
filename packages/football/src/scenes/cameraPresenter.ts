@@ -8,7 +8,7 @@
 import type * as Phaser from 'phaser';
 import {
   stepCamera,
-  clampFocus,
+  focusWithShake,
   cameraShakeOffset,
   prefersReducedMotion,
   type CameraInput,
@@ -26,9 +26,8 @@ export function presentCamera(
   input: CameraInput,
 ): CameraState {
   const next = stepCamera(state, input);
+  const focus = focusWithShake(next, cameraShakeOffset(shake, input.dt, prefersReducedMotion()));
   cam.setZoom(next.zoom);
-  const focus = clampFocus(next);
-  const offset = cameraShakeOffset(shake, input.dt, prefersReducedMotion());
-  cam.centerOn(focus.x + offset.x, focus.y + offset.y);
+  cam.centerOn(focus.x, focus.y);
   return next;
 }

@@ -101,6 +101,17 @@ export function clampFocus(state: CameraState): { x: number; y: number } {
   };
 }
 
+/** Final `centerOn` point: shake is added BEFORE the arena clamp so a casualty
+ *  impact at a sideline cannot pan the viewport into the VOID_BLACK surround.
+ *  Kept pure so this ordering is unit-testable. */
+export function focusWithShake(state: CameraState, offset: ShakeOffset): { x: number; y: number } {
+  return clampFocus({
+    ...state,
+    x: state.x + offset.x,
+    y: state.y + offset.y,
+  });
+}
+
 export type ShakeKind = 'TACKLE' | 'CASUALTY';
 
 /** Mutable shake state owned by the scene; the math stays here so it unit-tests. */
