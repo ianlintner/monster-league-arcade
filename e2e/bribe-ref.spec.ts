@@ -93,6 +93,9 @@ test('K→J bribes the ref once per half and the flag shows as a bogus penalty',
     expect(last!.penalties.some((p) => p.kind === 'BRIBE')).toBe(true);
     const banner = page.getByTestId('banner');
     await expect(banner).toContainText(/Yards —/i);
+    // A live-play banner must never show the carrier's raw fractional finalX
+    // (the old "+40.11731188 YARDS" defect). Whole/rounded yards only.
+    await expect(banner).not.toHaveText(/\d+\.\d{2,}/);
     if ((await mlf(page, (m) => m.bannerKind)) === 'PENALTY') {
       await expect(banner).toContainText('BOGUS PENALTY!');
     }

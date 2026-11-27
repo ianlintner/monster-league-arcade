@@ -934,7 +934,14 @@ export class GameSession {
     if (res.kind === 'SACK') return 'SACKED!';
     if (res.kind === 'PASS_INCOMPLETE') return 'INCOMPLETE';
     if (res.firstDown) return 'FIRST DOWN!';
-    return `${res.yards >= 0 ? '+' : ''}${res.yards} YARDS`;
+    // Live play commits the carrier's raw fractional finalX as `res.yards` so TD /
+    // safety / first-down classification stays exact. Round for DISPLAY only —
+    // the banner must never read "+40.11731188 YARDS". Math.round (the same
+    // whole-yard convention as hud.ts formatYards) keeps the sign so losses still
+    // read "-3 YARDS"; formatYards itself clamps negatives to "INCHES" and is a
+    // ui-layer helper, so it is not reused here.
+    const yards = Math.round(res.yards);
+    return `${yards >= 0 ? '+' : ''}${yards} YARDS`;
   }
 
   // --------------------------------------------------------------- penalties

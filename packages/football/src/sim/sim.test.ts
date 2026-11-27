@@ -162,6 +162,26 @@ describe('playbook', () => {
   });
 });
 
+describe('play-result banner formatting', () => {
+  it('rounds a fractional live-play gain for display but keeps the raw sim value', () => {
+    const g = start();
+    const r = run(g, 4.3172);
+    // The exact fraction stays on the result for TD / safety / first-down logic.
+    expect(r.yards).toBe(4.3172);
+    expect(r.firstDown).toBe(false);
+    // The banner is display-only: whole yards, never a raw float.
+    expect(r.banner).toBe('+4 YARDS');
+    expect(r.banner).not.toMatch(/\d+\.\d/);
+  });
+  it('keeps the loss sign on a fractional negative gain', () => {
+    const g = start();
+    const r = run(g, -3.7);
+    expect(r.yards).toBe(-3.7);
+    expect(r.banner).toBe('-4 YARDS');
+    expect(r.banner).not.toMatch(/\d+\.\d/);
+  });
+});
+
 describe('downs, clock & scoring', () => {
   it('kickoff touchback to the 25', () => {
     const g = start();
