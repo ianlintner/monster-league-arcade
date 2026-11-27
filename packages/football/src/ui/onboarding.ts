@@ -49,6 +49,7 @@ export function buildControlsCard(doc: Document): HTMLElement {
     ['Run', 'WASD run · J dive · L turbo'],
     ['Pass', 'L opens receiver windows · J / K / L throw'],
     ['Defense', 'WASD steer defender · K switch · J dive tackle'],
+    ['Sound', 'M mutes / unmutes'],
     ['This card', '? or H reopens it'],
   ];
   const keyRows = rows.map(([k, v]) => `<li><b>${k}</b> <span>${v}</span></li>`).join('');

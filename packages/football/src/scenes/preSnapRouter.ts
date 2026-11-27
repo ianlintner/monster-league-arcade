@@ -11,6 +11,7 @@ import { AudibleController, NASTY_INFO, getOffensePlay } from '../sim/index';
 import type { Button, GameSession, NastyKind, NastyRejection, TeamId, Side } from '../sim/index';
 import type { ArcadeButton } from '@monster-league/shared-core';
 import type { NastyFieldEffects } from '../field/NastyFieldEffects';
+import type { MatchAudio } from './matchAudio';
 
 /** The human always plays the home team. */
 export const HUMAN_TEAM: TeamId = 'home';
@@ -33,6 +34,8 @@ export interface PreSnapRuntime {
   nastyNoticeKind: NastyNoticeKind | null;
   nastyNoticeTimer: number;
   pressedBtn(b: ArcadeButton): boolean;
+  /** Cue player (optional: tests and silent pages omit it). */
+  audio?: MatchAudio;
 }
 
 export type RouteResult = 'HIKE' | 'HANDLED';
@@ -143,8 +146,10 @@ function resolveNasty(s: PreSnapRuntime, kind: NastyKind): void {
   s.nastyFields.begin(s.session.effects);
   const live =
     kind === 'BRIBE_REF' || kind === 'KILL_REF' || s.session.effects.active.includes(kind);
-  if (live) setNotice(s, `NASTY! ${name}`, 'call');
-  else setNotice(s, `${name} FIZZLED — WRONG PLAY TYPE`, 'refuse');
+  if (live) {
+    setNotice(s, `NASTY! ${name}`, 'call');
+    s.audio?.playNasty(kind);
+  } else setNotice(s, `${name} FIZZLED — WRONG PLAY TYPE`, 'refuse');
 }
 
 /**
@@ -156,6 +161,7 @@ export function cpuCallNasty(s: PreSnapRuntime, team: TeamId, kind: NastyKind): 
   const res = s.session.callNasty(team, kind);
   if (!res.ok) return false;
   setNotice(s, `CPU NASTY! ${NASTY_INFO[kind].name.toUpperCase()}`, 'call');
+  s.audio?.playNasty(kind);
   return true;
 }
 

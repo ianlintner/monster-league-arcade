@@ -1,4 +1,6 @@
+import { AudioManager } from '@monster-league/shared-core';
 import { initChrome } from './chrome';
+import { unlockOnFirstGesture, wireMuteControls } from './audioControls';
 import { bootFootball, buildScorebug } from '@monster-league/football';
 import type { HudState } from '@monster-league/football';
 
@@ -25,8 +27,15 @@ const initial: HudState = {
 
 document.getElementById('scorebug')?.append(buildScorebug(initial));
 
+// One AudioManager for the page. No AudioContext exists until the first real
+// gesture (keydown/pointer/gamepad) unlocks it, so autoplay policy is respected.
+const audio = new AudioManager();
+unlockOnFirstGesture(audio); // before the first-run card's capture handler
+audio.attachAutoUnlock();
+wireMuteControls(audio);
+
 const host = document.getElementById('game');
-if (host) bootFootball(host, { production: import.meta.env.PROD });
+if (host) bootFootball(host, { production: import.meta.env.PROD, audio });
 
 // Integer-scale the 640×360 backing canvas to the largest nearest-neighbour
 // multiple that fits the viewport (1x at ≤640, 2x at 1280, 3x at 1920, …). The
