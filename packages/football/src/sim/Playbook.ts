@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- grandfathered MVP core (ARCHITECTURE.md "File-size ceiling"); split along existing seams when touched, not speculatively. */
 import { DEFENSE_SLOTS, OFFENSE_SLOTS } from './Roster';
 import type { DefenseSlot, OffenseSlot, Side } from './Roster';
 
