@@ -15,6 +15,7 @@ import {
   downDistanceLabel,
   factionName,
   formatClock,
+  formatYards,
   losLabel,
 } from '../ui/hud';
 import type { FactionId } from '@monster-league/shared-core';
@@ -62,7 +63,7 @@ export function composeReadyLine(s: HudState): ReadyLine {
   const clock = `${String(Math.floor(s.session.clock / 60)).padStart(2, '0')}:${String(
     Math.floor(s.session.clock % 60),
   ).padStart(2, '0')}`;
-  const down = `DOWN ${s.session.down} · ${s.session.yardsToGo} TO GO`;
+  const down = `DOWN ${s.session.down} · ${formatYards(s.session.yardsToGo)} TO GO`;
 
   const prompt = composePrompt(s, down);
   const line = `${down}  ${clock}\n${prompt}`;

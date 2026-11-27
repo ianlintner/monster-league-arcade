@@ -44,9 +44,13 @@ test('real-keyboard drive: four downs each tap, snap, steer, whistle', async ({ 
     await expect(page.getByTestId('huddle-overlay')).toBeVisible();
     await expect.poll(async () => (await mlf(page)).mode, { timeout: 5_000 }).toBe('PICK');
 
-    // Call the first run play with a real 30 ms A (J) tap — short enough to fall
-    // between two 60 Hz polls, so only the edge-buffered latch can deliver it.
-    await tap(page, P1.A);
+    // Call a run play with a real 30 ms tap — short enough to fall between two
+    // 60 Hz polls, so only the edge-buffered latch can deliver it. On 4th down A
+    // is the PUNT and would leave the down parked in the kick meter (which needs
+    // a C hold/release, not this smoke test's steer-and-whistle path), so call
+    // C = "Go For It" — the same real-key choice full-match.spec.ts uses.
+    const call = await mlf(page);
+    await tap(page, call.down >= 4 ? P1.C : P1.A);
     await expect(page.getByTestId('huddle-overlay')).toBeHidden();
     await expect.poll(async () => (await mlf(page)).mode, { timeout: 5_000 }).toBe('PRE_SNAP');
 
