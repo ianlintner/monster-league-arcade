@@ -26,6 +26,52 @@ export function yardNumberLabel(fieldX: number): string {
 }
 
 /**
+ * Lit cells of the 3×5 pixel font used for yard numbers. The original bitmask
+ * was written row-major from the top-left, but the renderer read bit 0 as the
+ * top-left cell — a 180° flip that turned `3` into a mirrored "E" and `6`/`9`
+ * into "h"-like shapes on the far sideline. The cell mapping below restores the
+ * intended upright glyph; both sidelines read correctly from the camera.
+ */
+export const YARD_NUMBER_GLYPHS: Record<string, number> = {
+  '0': 0x7b6f,
+  '1': 0x1249,
+  '2': 0x73e7,
+  '3': 0x73cf,
+  '4': 0x5bc9,
+  '5': 0x79cf,
+  '6': 0x79ef,
+  '7': 0x7249,
+  '8': 0x7bef,
+  '9': 0x7bcf,
+};
+
+export type YardNumberSide = 'near' | 'far';
+
+export interface YardNumberCell {
+  /** Index of the digit within the label (0 for "10"'s leading "1"). */
+  digit: number;
+  /** Glyph column, 0 = left, 2 = right. */
+  col: number;
+  /** Glyph row, 0 = top, 4 = bottom. */
+  row: number;
+}
+
+/** Upright 3×5 cells for a label; `side` is accepted so both sidelines share
+ *  the same tested orientation helper (no mirrored far-side numerals). */
+export function yardNumberCells(label: string, _side: YardNumberSide = 'near'): YardNumberCell[] {
+  const cells: YardNumberCell[] = [];
+  for (let digit = 0; digit < label.length; digit++) {
+    const bits = YARD_NUMBER_GLYPHS[label[digit] ?? '0'] ?? 0;
+    for (let row = 0; row < 5; row++) {
+      for (let col = 0; col < 3; col++) {
+        if (bits & (1 << ((4 - row) * 3 + (2 - col)))) cells.push({ digit, col, row });
+      }
+    }
+  }
+  return cells;
+}
+
+/**
  * Screen-space corners of one rectangular field region [x0, x1] × [0, fieldHeight]
  * under the 2.5D projection. Returns `farL, farR, nearR, nearL` mapped to screen
  * pixels (the far edge is narrowed by `farScale`), so callers can draw the region

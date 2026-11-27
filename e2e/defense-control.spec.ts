@@ -80,7 +80,13 @@ test('human defense: steer, B switches to nearest, A dive tackles', async ({ pag
   while (!tackled) {
     expect(Date.now(), 'never completed a controlled dive tackle').toBeLessThan(deadline);
     const s = await snap(page);
-    if (s.possession !== 'away') break; // CPU drive ended; handled below
+    if (s.possession !== 'away') {
+      // The CPU drive ended (punt / score / turnover) before a dive connected:
+      // drive home downs with real keys until the CPU has the ball again, then
+      // keep trying. Exiting here made the test fail on an unlucky drive.
+      await reachCpuPossession(page);
+      continue;
+    }
     if (s.mode !== 'LIVE') {
       await page.waitForTimeout(100);
       continue;
@@ -95,19 +101,30 @@ test('human defense: steer, B switches to nearest, A dive tackles', async ({ pag
     const firstId = first.controlled!;
     expect(pos(first, firstId)?.side).toBe('DEFENSE');
 
-    // Steer: hold D (right / downfield); the controlled defender must move +x.
+    // Steer: hold D (right / downfield) until the controlled defender has
+    // actually moved +x. The frame loop caps sim steps at 4, so under CI load a
+    // fixed 350 ms wall-clock slice can be far less than 350 ms of game time;
+    // poll the state while the key stays down instead of guessing a duration.
     const before = pos(first, firstId)!;
     await page.keyboard.down(P1.right);
-    await page.waitForTimeout(350);
+    await expect
+      .poll(
+        async () => {
+          const m = await snap(page);
+          const p = pos(m, firstId);
+          // The down ended (or control moved) before we could measure: settle the
+          // poll so the check below skips to the next CPU down instead of failing.
+          if (m.mode !== 'LIVE' || m.controlled !== firstId || !p) return Infinity;
+          return p.x - before.x;
+        },
+        { timeout: 5_000, message: 'held D must move the controlled defender +x' },
+      )
+      .toBeGreaterThan(0.5);
     const mid = await snap(page);
     if (mid.mode !== 'LIVE' || mid.controlled !== firstId) {
       await page.keyboard.up(P1.right);
       continue; // the down ended too quickly; try the next CPU down
     }
-    expect(
-      pos(mid, firstId)!.x - before.x,
-      'held D must move the controlled defender +x',
-    ).toBeGreaterThan(0.5);
     if (!shot) {
       await page.screenshot({ path: join(screenshotDir, 'ml-pq3-defense-ring.png') });
       shot = true;
@@ -130,19 +147,22 @@ test('human defense: steer, B switches to nearest, A dive tackles', async ({ pag
     expect(sw.controlled, 'K must change the controlled defender').not.toBe(firstId);
     expect(byDistanceToCarrier(sw).slice(0, 2)).toContain(sw.controlled);
 
-    // Close in on the carrier with real stick keys (S = +y), then dive with a
-    // neutral stick: the lunge heads straight at the carrier and tackles on contact.
+    // Close in with real stick keys, then dive with a neutral stick: the lunge
+    // heads straight at the carrier. Wait for the *state* (within dive range)
+    // rather than a fixed 1.5 s wall-clock slice — under CI load the capped
+    // fixed-step sim can advance well under 1.5 s of game time in that window,
+    // so the old timing launched the dive from too far and only whiffed.
     const diver = sw.controlled;
-    const closeBy = Date.now() + 1_500;
+    const closeBy = Date.now() + 5_000;
     for (;;) {
       const c = await snap(page);
       const me = pos(c, diver);
       const ball = pos(c, c.carrierId);
-      if (c.mode !== 'LIVE' || !me || !ball || distTo(me, ball) < 2.6 || Date.now() > closeBy)
-        break;
+      if (c.mode !== 'LIVE' || !me || !ball || Date.now() > closeBy) break;
+      if (distTo(me, ball) < 2.2) break;
       const held: string[] = [];
-      if (Math.abs(ball.x - me.x) > 0.6) held.push(ball.x > me.x ? P1.right : P1.left);
-      if (Math.abs(ball.y - me.y) > 0.6) held.push(ball.y > me.y ? P1.down : P1.up);
+      if (Math.abs(ball.x - me.x) > 0.4) held.push(ball.x > me.x ? P1.right : P1.left);
+      if (Math.abs(ball.y - me.y) > 0.4) held.push(ball.y > me.y ? P1.down : P1.up);
       for (const k of held) await page.keyboard.down(k);
       await page.waitForTimeout(60);
       for (const k of held) await page.keyboard.up(k);

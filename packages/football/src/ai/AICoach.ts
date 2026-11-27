@@ -69,9 +69,12 @@ function oppScore(s: CoachSituation): number {
   return s.team === 'home' ? s.score.away : s.score.home;
 }
 
-/** Deterministic, side-agnostic pick from a list. */
+/** Deterministic, side-agnostic pick from a list. Yardage from a live session is
+ * fractional (`2.0869…`), so coerce `n` to an integer index instead of using it
+ * raw — an array accessed at `items[5.08]` is `undefined`. */
 function pick<T>(items: readonly T[], n: number): T {
-  return items[n % items.length]!;
+  const index = Number.isFinite(n) ? Math.floor(n) : 0;
+  return items[((index % items.length) + items.length) % items.length]!;
 }
 
 function scoreDiff(s: CoachSituation): number {

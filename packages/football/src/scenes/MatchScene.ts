@@ -44,7 +44,7 @@ import {
   type ActorAnimation,
   type ActorPresentationState,
 } from './spriteRenderer';
-import { ActorPresenter, type PresentScene } from './actorPresenter';
+import { ActorPresenter, type PresentScene, type BallMarker } from './actorPresenter';
 import { installDebugHandle, type DebugHandleSurface } from './debugHandle';
 import { MatchController, resetMatchPresentation } from './matchController';
 import { cpuOnOffense } from './cpuOpponent';
@@ -128,6 +128,8 @@ export class MatchScene extends Phaser.Scene {
    *  each frame in `drawActors` so the e2e suite can assert the controlled player's
    *  on-screen sprite is readable (≥48 CSS px tall) without bypassing input. */
   private carrierScreen: { px: number; py: number; scale: number } | null = null;
+  /** Last-rendered ball marker for the read-only readability seam. */
+  private ballMarker: BallMarker | null = null;
   /** Hazard terrain drawn on its own layer above the static field so mines that
    *  detonate/clear (and geysers that re-arm) can be redrawn without repainting. */
   private hazardGfx!: Phaser.GameObjects.Graphics;
@@ -414,10 +416,7 @@ export class MatchScene extends Phaser.Scene {
     this.looseBall = null;
     this.liveLos = this.session.los;
     this.runDist.clear();
-    this.lastPos.clear();
-    this.animClock.clear();
-    this.animKind.clear();
-    this.presentation.clear();
+    for (const m of [this.lastPos, this.animClock, this.animKind, this.presentation]) m.clear();
     this.camera = { ...INITIAL_CAMERA };
     resetMatchPresentation(this);
     // Force the huddle overlay to rebuild and drop the result card.
@@ -472,6 +471,7 @@ export class MatchScene extends Phaser.Scene {
     this.spriteBackedActorCount = actors.spriteBackedActorCount;
     this.carrierScreen = actors.carrierScreen;
     const overlays = this.actorPresenter.renderOverlays(this.renderContext(), dt);
+    this.ballMarker = overlays.ballMarker ?? actors.ballMarker;
     this.damagePopups = overlays.damagePopups;
     this.casualties = overlays.casualties;
     this.looseBall = overlays.looseBall;
@@ -680,6 +680,7 @@ export class MatchScene extends Phaser.Scene {
       lastResult: () => this.session?.lastResult ?? null,
       hazardManager: () => this.hazardManager,
       spriteBackedActorCount: () => this.spriteBackedActorCount,
+      ballMarker: () => this.ballMarker,
       carrierScreen: () => this.carrierScreen,
       camZoom: () => this.camera.zoom,
       bannerKind: () => this.bannerKind,

@@ -45,7 +45,9 @@ function mlf(page: Page): () => Promise<Mlf> {
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
-test('canvas is integer-scaled to 2x at 1280 wide, nearest-neighbour', async ({ page }) => {
+test('canvas fits the bezel at 1280 wide without horizontal overflow, nearest-neighbour', async ({
+  page,
+}) => {
   await openField(page);
   const r = await page.evaluate(() => {
     const c = document.querySelector<HTMLCanvasElement>('#game canvas')!;
@@ -56,13 +58,18 @@ test('canvas is integer-scaled to 2x at 1280 wide, nearest-neighbour', async ({ 
       cssW: rect.width,
       cssH: rect.height,
       imageRendering: getComputedStyle(c).imageRendering,
+      viewportW: window.innerWidth,
+      docScrollW: document.documentElement.scrollWidth,
     };
   });
-  // 640×360 backing rendered as an exact integer multiple (2x at 1280 wide).
+  // 640×360 backing; the bezel's padding/chrome leaves less than 1280px, so an
+  // exact 2x canvas would spill past the viewport. It now fits the bezel fluidly.
   expect(r.attrW).toBe(640);
   expect(r.attrH).toBe(360);
-  expect(r.cssW).toBe(1280);
-  expect(r.cssH).toBe(720);
+  expect(r.cssW).toBeGreaterThan(1000);
+  expect(r.cssW).toBeLessThan(r.viewportW);
+  expect(r.cssH).toBeCloseTo((r.cssW * 360) / 640, 0);
+  expect(r.docScrollW).toBeLessThanOrEqual(r.viewportW);
   expect(r.imageRendering).toBe('pixelated');
 });
 
@@ -131,7 +138,7 @@ test('controlled player renders at least 48 CSS px tall at 1280x800', async ({ p
   const cssScale = await page.evaluate(() => {
     const c = document.querySelector<HTMLCanvasElement>('#game canvas')!;
     const rect = c.getBoundingClientRect();
-    return rect.width / c.width; // 2 at 1280 wide
+    return rect.width / c.width; // fluid fit at 1280 wide, integer on roomier viewports
   });
   const cssHeight = SPRITE_BACKING * carrier!.scale * carrier!.camZoom * cssScale;
   expect(cssHeight).toBeGreaterThanOrEqual(48);

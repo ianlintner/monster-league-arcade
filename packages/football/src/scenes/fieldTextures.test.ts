@@ -4,6 +4,7 @@ import {
   RIGHT_GOAL_X,
   regionBandXRange,
   regionCorners,
+  yardNumberCells,
   yardNumberLabel,
 } from './fieldTextures';
 
@@ -42,6 +43,34 @@ describe('yardNumberLabel', () => {
     // round a hypothetical goal-line call to "0" rather than fold into "10".
     expect(yardNumberLabel(LEFT_GOAL_X)).toBe('0');
     expect(yardNumberLabel(RIGHT_GOAL_X)).toBe('0');
+  });
+});
+
+describe('yardNumberCells', () => {
+  function matrix(label: string, side: 'near' | 'far'): string[] {
+    const grid = Array.from({ length: 5 }, () => ['.', '.', '.']);
+    for (const c of yardNumberCells(label, side)) {
+      grid[c.row]![c.digit * 4 + c.col] = '#';
+    }
+    return grid.map((row) => Array.from({ length: row.length }, (_, i) => row[i] ?? '.').join(''));
+  }
+
+  it('draws upright glyphs on both sidelines (no mirrored E/h digits)', () => {
+    for (const side of ['near', 'far'] as const) {
+      expect(matrix('3', side)).toEqual(['###', '..#', '###', '..#', '###']);
+      expect(matrix('6', side)).toEqual(['###', '#..', '###', '#.#', '###']);
+      expect(matrix('9', side)).toEqual(['###', '#.#', '###', '..#', '###']);
+      expect(matrix('2', side)).toEqual(['###', '..#', '###', '#..', '###']);
+    }
+  });
+
+  it('keeps both digits of a two-character label and identical side orientation', () => {
+    const near = matrix('30', 'near');
+    expect(near).toEqual(matrix('30', 'far'));
+    // digit 0 ("3") occupies cols 0..2, digit 1 ("0") starts at col 3.
+    expect(near[0]).toBe('###.###');
+    expect(near[4]).toBe('###.###');
+    expect(yardNumberCells('30', 'far').every((c) => c.digit === 0 || c.digit === 1)).toBe(true);
   });
 });
 

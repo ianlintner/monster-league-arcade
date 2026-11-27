@@ -20,8 +20,9 @@ export interface Faction {
   id: FactionId;
   name: string;
   species: string;
-  /** Primary / secondary / accent uniform colours (#RRGGBB). */
-  colors: { primary: string; secondary: string; accent: string };
+  /** Primary / secondary / accent uniform colours (#RRGGBB), plus the exact
+   *  sprite-sheet jersey colour used by the HUD crest swatch. */
+  colors: { primary: string; secondary: string; accent: string; jersey: string };
   stats: FactionStats;
   stars: StarPlayer[];
   homeArena: ArenaId;
@@ -41,7 +42,7 @@ export const FACTIONS: readonly Faction[] = [
     id: 'reapers',
     name: 'Boneyard Reapers',
     species: 'Skeletons',
-    colors: { primary: '#F4EFE6', secondary: '#2B0938', accent: '#00F0FF' },
+    colors: { primary: '#F4EFE6', secondary: '#2B0938', accent: '#00F0FF', jersey: '#2B0938' },
     stats: { speed: 8, power: 5, passing: 7, defense: 6 },
     stars: [
       { name: 'Rib Rodriguez', position: 'QB' },
@@ -56,7 +57,7 @@ export const FACTIONS: readonly Faction[] = [
     id: 'deadskins',
     name: 'Rotting Deadskins',
     species: 'Zombies',
-    colors: { primary: '#6B8E23', secondary: '#8B1E1E', accent: '#39FF14' },
+    colors: { primary: '#6B8E23', secondary: '#8B1E1E', accent: '#39FF14', jersey: '#8B1E1E' },
     stats: { speed: 4, power: 10, passing: 4, defense: 8 },
     stars: [
       { name: 'Brain Bobbitt', position: 'RB' },
@@ -71,7 +72,7 @@ export const FACTIONS: readonly Faction[] = [
     id: 'nightstalkers',
     name: 'Transylvania Nightstalkers',
     species: 'Vampires',
-    colors: { primary: '#990024', secondary: '#FFD166', accent: '#110B1A' },
+    colors: { primary: '#990024', secondary: '#FFD166', accent: '#110B1A', jersey: '#990024' },
     stats: { speed: 9, power: 6, passing: 8, defense: 5 },
     stars: [
       { name: 'Count Cutback', position: 'RB' },
@@ -86,7 +87,7 @@ export const FACTIONS: readonly Faction[] = [
     id: 'ghouls',
     name: 'Salem Bayou Ghouls',
     species: 'Ghouls & Witches',
-    colors: { primary: '#7B2CBF', secondary: '#FF6B1A', accent: '#2A4D3E' },
+    colors: { primary: '#7B2CBF', secondary: '#FF6B1A', accent: '#2A4D3E', jersey: '#7B2CBF' },
     stats: { speed: 6, power: 6, passing: 6, defense: 9 },
     stars: [
       { name: 'Hester Hexington', position: 'QB' },
