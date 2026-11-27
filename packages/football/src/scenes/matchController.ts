@@ -16,6 +16,7 @@ import type { HazardManager } from '../field/HazardManager';
 import { NastyFieldEffects } from '../field/NastyFieldEffects';
 import type { BannerKind } from '../ui/hud';
 import type { ActorAnimation, ActorPresentationState } from './spriteRenderer';
+import type { CameraShake } from './cameraRig';
 import { updateLive, commitPass } from './matchSim';
 import { settleExpiredPeriod, updateBanner } from './matchOutcome';
 import { CPU_TEAM, cpuOnOffense, cpuCallOffense } from './cpuOpponent';
@@ -151,9 +152,14 @@ export interface MatchRuntime extends PreSnapRuntime {
   passingUntil: number;
 
   damagePopups: { x: number; y: number; text: string; color: number; ttl: number }[];
-  casualties: { id: string; x: number; y: number; ttl: number }[];
+  casualties: { id: string; x: number; y: number; ttl: number; label?: string }[];
   looseBall: { x: number; y: number; ttl: number } | null;
   ballHolderId: string | null;
+
+  /** Hit-reaction camera offset state (pure math in `cameraRig`). */
+  shake: CameraShake;
+  /** Teams already warned about being one casualty from a forfeit (per match). */
+  forfeitWarned: Set<string>;
 
   playerInput: InputSnapshot;
 
@@ -299,6 +305,8 @@ export class MatchController {
     this.s.damagePopups = [];
     this.s.casualties = [];
     this.s.looseBall = null;
+    this.s.shake.amplitude = 0;
+    this.s.shake.remaining = 0;
     // Reset the Ghoul Gas cloud with the other per-down presentation state: if the
     // previous down ended while gas was active, `liveElapsed` stays frozen through
     // the banner/PRE_SNAP, so a stale cloud would otherwise keep drawing over the

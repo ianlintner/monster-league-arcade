@@ -100,3 +100,76 @@ export function clampFocus(state: CameraState): { x: number; y: number } {
     y: Math.max(halfH, Math.min(CAMERA_CANVAS_HEIGHT - halfH, state.y)),
   };
 }
+
+export type ShakeKind = 'TACKLE' | 'CASUALTY';
+
+/** Mutable shake state owned by the scene; the math stays here so it unit-tests. */
+export interface CameraShake {
+  amplitude: number;
+  remaining: number;
+  duration: number;
+  phase: number;
+}
+
+export const INITIAL_SHAKE: CameraShake = {
+  amplitude: 0,
+  remaining: 0,
+  duration: 0,
+  phase: 0,
+};
+
+/** Peak pixel offsets in the 640x360 virtual canvas. A casualty hits harder. */
+export const SHAKE_STRENGTH: Record<ShakeKind, number> = { TACKLE: 2.4, CASUALTY: 6.5 };
+const SHAKE_DURATION = 0.34;
+const SHAKE_FREQUENCY = 43;
+
+export interface ShakeOffset {
+  x: number;
+  y: number;
+}
+
+export const NO_SHAKE: ShakeOffset = { x: 0, y: 0 };
+
+/** Strike the camera. A stronger current hit supersedes a weaker one still ringing. */
+export function kickShake(shake: CameraShake, kind: ShakeKind): void {
+  const strength = SHAKE_STRENGTH[kind];
+  const current = shake.duration > 0 ? shake.amplitude * (shake.remaining / shake.duration) : 0;
+  if (strength > current) shake.amplitude = strength;
+  shake.remaining = SHAKE_DURATION;
+  shake.duration = SHAKE_DURATION;
+}
+
+/**
+ * Advance the shake by `dt` seconds and return the pixel offset to add to the
+ * camera centre. Quadratic decay guarantees an exact zero at the end of the
+ * window. Reduced motion clears the state and returns no offset at all.
+ */
+export function cameraShakeOffset(
+  shake: CameraShake,
+  dt: number,
+  reducedMotion: boolean,
+): ShakeOffset {
+  if (reducedMotion) {
+    shake.amplitude = 0;
+    shake.remaining = 0;
+    return NO_SHAKE;
+  }
+  if (shake.remaining <= 0 || shake.amplitude <= 0) return NO_SHAKE;
+  const step = Math.max(0, dt);
+  shake.phase += step * SHAKE_FREQUENCY;
+  shake.remaining = Math.max(0, shake.remaining - step);
+  if (shake.remaining <= 0) {
+    shake.amplitude = 0;
+    return NO_SHAKE;
+  }
+  const decay = (shake.remaining / shake.duration) ** 2;
+  const amp = shake.amplitude * decay;
+  return { x: amp * Math.sin(shake.phase), y: amp * 0.65 * Math.cos(shake.phase * 1.7) };
+}
+
+/** Read the live OS preference; safe in Node tests (no `window`). */
+export function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    : false;
+}

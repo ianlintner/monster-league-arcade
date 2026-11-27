@@ -102,12 +102,22 @@ function crestMarkup(faction: FactionId, className: string): HTMLElement {
 function skullRow(team: 'home' | 'away', casualties: number): HTMLElement {
   const row = el('span', 'gsn-skulls');
   row.setAttribute('data-testid', `skulls-${team}`);
-  row.setAttribute('aria-label', `${casualties} casualties`);
+  const warning = casualties === CARNAGE_LIMIT - 1;
+  if (warning) row.setAttribute('data-warning', 'forfeit');
+  row.setAttribute(
+    'aria-label',
+    warning ? `${casualties} casualties — 1 more = forfeit` : `${casualties} casualties`,
+  );
   for (let i = 0; i < CARNAGE_LIMIT; i++) {
     const skull = el('span', 'gsn-skull');
     skull.setAttribute('data-lit', String(i < casualties));
     row.append(skull);
   }
+  // Always present (hidden until the warning fires) so syncHud can toggle it in
+  // place without rebuilding the scorebug mid-match.
+  const label = el('span', 'gsn-skulls__warning', '1 MORE = FORFEIT');
+  label.hidden = !warning;
+  row.append(label);
   return row;
 }
 

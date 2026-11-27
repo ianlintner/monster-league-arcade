@@ -507,6 +507,39 @@ body.gsn-crt-on .gsn-crt-overlay {
   box-shadow: 0 0 8px var(--gsn-vampire-crimson);
 }
 
+/* Carnage warning: one casualty short of an automatic forfeit. */
+.gsn-skulls__warning {
+  margin-left: 6px;
+  font-family: var(--gsn-font-pixel);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--gsn-vampire-crimson);
+  text-shadow: 0 0 6px var(--gsn-vampire-crimson);
+  white-space: nowrap;
+}
+
+.gsn-skulls[data-warning='forfeit'] {
+  outline: 1px solid var(--gsn-vampire-crimson);
+  outline-offset: 3px;
+  animation: gsn-forfeit-pulse 800ms steps(2, end) infinite;
+}
+
+@keyframes gsn-forfeit-pulse {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.8);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gsn-skulls[data-warning='forfeit'] {
+    animation: none;
+  }
+}
+
 /* ── Canvas bezel + bottom control bar ────────────────────────────────────── */
 
 .gsn-stage {

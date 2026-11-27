@@ -21,8 +21,15 @@ import { GameSession, type AudibleController, type Button, type NastyKind } from
 import { resetNotice, resetRouter, type NastyNoticeKind } from './preSnapRouter';
 import { drawFieldSprites, drawField, drawHazards, hazardStateKey } from './fieldRenderer';
 import type { DrawSurface } from './fieldRenderer';
-import { stepCamera, clampFocus, INITIAL_CAMERA } from './cameraRig';
-import type { CameraState } from './cameraRig';
+import {
+  stepCamera,
+  clampFocus,
+  INITIAL_CAMERA,
+  INITIAL_SHAKE,
+  cameraShakeOffset,
+  prefersReducedMotion,
+} from './cameraRig';
+import type { CameraState, CameraShake } from './cameraRig';
 import {
   composeReadyLine,
   updateScorebug,
@@ -201,6 +208,11 @@ export class MatchScene extends Phaser.Scene {
    *  smoothly for deep passes and kicks. Focus/zoom math + arena clamp live in
    *  `cameraRig`; this holds only the owned `CameraState` between frames. */
   private camera: CameraState = { ...INITIAL_CAMERA };
+
+  /** Impact camera offset; the math is pure in `cameraRig`, the scene applies it. */
+  shake: CameraShake = { ...INITIAL_SHAKE };
+  /** Teams already warned they are one casualty from an automatic forfeit. */
+  forfeitWarned = new Set<string>();
 
   /** Ball in flight (pass animation) — null when no ball is airborne. */
   ballFlight: {
@@ -461,6 +473,10 @@ export class MatchScene extends Phaser.Scene {
 
     this.match.updateMode(dt);
     this.audio.tick(this.mode);
+    // LivePlay owns the *only* hit-stop clock. Freeze actor animation frames while
+    // it is active so a tackle reads as a real impact, not a sprite shuffle.
+    const frozen = (this.live?.snapshot().actors ?? []).some((a) => a.hitStop > 0);
+    this.renderDt = frozen ? 0 : dt;
     const actors = this.actorPresenter.renderActors(this.renderContext());
     this.spriteBackedActorCount = actors.spriteBackedActorCount;
     this.carrierScreen = actors.carrierScreen;
@@ -492,7 +508,10 @@ export class MatchScene extends Phaser.Scene {
     // Clamp the focus to the arena so the view never pans into the VOID_BLACK
     // surround at the end zones / sidelines (see cameraRig.clampFocus).
     const focus = clampFocus(this.camera);
-    cam.centerOn(focus.x, focus.y);
+    // Hit-reaction offset is added to the centred focus, never to the tracked
+    // state, so the lerp continues toward the real ball and cannot drift away.
+    const shake = cameraShakeOffset(this.shake, dt, prefersReducedMotion());
+    cam.centerOn(focus.x + shake.x, focus.y + shake.y);
   }
 
   // ------------------------------------------------------------- inputs

@@ -76,6 +76,8 @@ function makeRuntime(session: GameSession): MatchRuntime {
     casualties: [],
     looseBall: null,
     ballHolderId: null,
+    shake: { amplitude: 0, remaining: 0, duration: 0, phase: 0 },
+    forfeitWarned: new Set<string>(),
     playerInput: {
       x: 0,
       y: 0,

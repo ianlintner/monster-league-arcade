@@ -123,6 +123,15 @@ export class MatchAudio {
     this.play(cuesForNasty(kind));
   }
 
+  /**
+   * Urgent buzzer at one casualty short of a forfeit. The casualty voice fired by
+   * `playResult` already names the fallen player, so no new voice clip is needed.
+   */
+  playForfeitWarning(): void {
+    this.sink?.playSfx('penalty-buzzer');
+    this.sink?.playSfx('bleep-c');
+  }
+
   /** One voice at a time: a line requested while another is still speaking is dropped. */
   private voice(id: VoiceClipId): void {
     const t = this.now();
