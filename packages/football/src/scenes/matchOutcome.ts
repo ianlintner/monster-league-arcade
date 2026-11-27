@@ -202,6 +202,7 @@ function settleToNextHuddle(s: MatchRuntime): void {
   // overlay, restored huddle beat). Leaving `cpuPlayId` set would make
   // `updatePick` confirm the stale play id immediately on the next down.
   s.cpuPlayId = null;
+  s.cpuNasty = null;
   s.cpuHuddleClock = 0;
   s.cpuSnapClock = 0;
   s.cpuPassClock = 0;

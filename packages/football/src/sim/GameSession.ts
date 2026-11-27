@@ -327,6 +327,9 @@ export class GameSession {
     return sel;
   }
 
+  /** Read-only audit trail of every accepted Nasty call (e2e / telemetry assertions). */
+  readonly nastyLog: { team: TeamId; kind: NastyKind; half: number }[] = [];
+
   /** Spend a once-per-half Nasty Audible charge (including Bribe Ref / Kill Ref). */
   callNasty(team: TeamId, kind: NastyKind): NastyResult {
     if (this.phase !== 'PRE_SNAP')
@@ -343,6 +346,7 @@ export class GameSession {
     if (!this.charges.available(team, kind, this.half))
       return { ok: false, reason: 'ALREADY_USED_THIS_HALF' };
     this.charges.consume(team, kind, this.half);
+    this.nastyLog.push({ team, kind, half: this.half });
     if (kind === 'BRIBE_REF') this.ref.bribe(team);
     else if (kind === 'KILL_REF') this.ref.startHunt(team);
     else this.active.push({ team, kind });
@@ -905,7 +909,16 @@ export class GameSession {
     return res;
   }
 
+  /** Play headline, with Necro-Ref flags / a slain ref surfaced (flags never apply on scores). */
   private bannerFor(res: PlayResult): string {
+    const base = this.playHeadline(res);
+    if (res.touchdown || res.safety || res.fieldGoalGood) return base;
+    const flags = res.penalties.map((p) => p.text).join(' · ');
+    if (res.refKilled) return `REF LIQUIDATED! ${flags || base}`;
+    return flags ? `${base} · ${flags}` : base;
+  }
+
+  private playHeadline(res: PlayResult): string {
     if (res.touchdown) return 'TOUCHDOWN!';
     if (res.safety) return 'SAFETY!';
     if (res.fieldGoalGood) return 'FIELD GOAL IS GOOD!';

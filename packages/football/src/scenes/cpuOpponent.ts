@@ -14,8 +14,11 @@
  *   2. What offense play should the CPU call (and what situation feeds the coach)?
  *   3. On a CPU pass, which receiver window is most open (best-scored)?
  *
- * Scope guard (card `t_076ffea6`): the human side's defense stays `DEFAULT_DEFENSE`,
- * and no Nasty Audible is ever armed by the CPU here — those are ML-NEXT.
+ * Scope guard: the human side's defense stays `DEFAULT_DEFENSE`. The CPU may arm the
+ * nasty its coach chose (ML-NEXT scope 2) — but only through `session.callNasty`
+ * (see `preSnapRouter.cpuCallNasty`), so it spends the same once-per-half charges as
+ * the human and can never cheat the rules engine. CPU *defense* nasties stay out of
+ * scope: `cpuSituation` is offense-only.
  */
 import type { GameSession } from '../sim/index';
 import { getOffensePlay } from '../sim/index';
@@ -56,7 +59,7 @@ export function cpuSituation(session: GameSession): CoachSituation {
   };
 }
 
-/** The CPU's offense play-call (never its nasty — that is out of scope here). */
+/** The CPU's offense play-call; `.nasty` is the trick the coach wants armed (spent by the scene). */
 export function cpuCallOffense(session: GameSession): CoachDecision {
   return decideCoachPlay(cpuSituation(session));
 }

@@ -3,6 +3,8 @@ import { GameSession } from '../sim/GameSession';
 import { NastyFieldEffects } from '../field/NastyFieldEffects';
 import {
   MENU_TIMEOUT_S,
+  cpuCallNasty,
+  menuOpen,
   routePreSnapButton,
   tickNotice,
   updateRouter,
@@ -95,10 +97,56 @@ describe('pre-snap combo router', () => {
     expect(s.audiblePlayId).not.toBe('INSIDE_GORE_RUN');
   });
 
-  it('B from IDLE is a no-op (ref-menu hook)', () => {
+  it('B from IDLE opens the ref menu; C inside it cancels without hiking', () => {
     const s = runtime();
     expect(combo(s, 'B')).toEqual(['HANDLED']);
+    expect(s.audible?.state).toBe('REF_MENU');
+    expect(menuOpen(s)).toBe(true);
+    expect(combo(s, 'C')).toEqual(['HANDLED']);
     expect(s.audible).toBeNull();
+    expect(s.session.nastyLog).toEqual([]);
+    expect(s.session.ref.isBribed).toBe(false);
+  });
+
+  it('B,A bribes the ref (offense) and a second bribe the same half is refused', () => {
+    const s = runtime();
+    combo(s, 'B', 'A');
+    expect(s.session.ref.isBribed).toBe(true);
+    expect(s.session.ref.bribedBy).toBe('home');
+    expect(s.nastyNoticeKind).toBe('call');
+    expect(s.nastyNotice).toContain('BRIBE REF');
+    combo(s, 'B', 'A');
+    expect(s.nastyNoticeKind).toBe('refuse');
+    expect(s.nastyNotice).toMatch(/REFUSED.*ALREADY USED/);
+    expect(s.session.nastyLog).toHaveLength(1);
+  });
+
+  it('B,B starts the Kill Ref hunt, and works on defense too', () => {
+    const s = runtime({ possession: 'away', off: 'INSIDE_GORE_RUN' });
+    combo(s, 'B', 'B');
+    expect(s.session.ref.huntedBy).toBe('home');
+    expect(s.nastyNotice).toContain('KILL REF');
+  });
+
+  it('the Demon Ref refuses both ref tricks with a visible message', () => {
+    const s = runtime();
+    s.session.ref.kind = 'DEMON_REF';
+    combo(s, 'B', 'A');
+    expect(s.nastyNoticeKind).toBe('refuse');
+    expect(s.nastyNotice).toContain('DEMON REF');
+    combo(s, 'B', 'B');
+    expect(s.nastyNotice).toContain('DEMON REF');
+    expect(s.session.ref.isBribed).toBe(false);
+    expect(s.session.ref.huntedBy).toBeNull();
+  });
+
+  it('cpuCallNasty spends the CPU charge once and announces it', () => {
+    const s = runtime({ possession: 'away', off: 'QUICK_SLANTS' });
+    expect(cpuCallNasty(s, 'away', 'BAT_WING_JET_BOOST')).toBe(true);
+    expect(s.nastyNotice).toContain('CPU NASTY');
+    expect(s.session.charges.available('away', 'BAT_WING_JET_BOOST', 1)).toBe(false);
+    expect(cpuCallNasty(s, 'away', 'BAT_WING_JET_BOOST')).toBe(false);
+    expect(s.session.nastyLog).toHaveLength(1);
   });
 
   it('the callout expires', () => {

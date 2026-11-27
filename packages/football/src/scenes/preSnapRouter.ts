@@ -62,7 +62,10 @@ export function resetNotice(s: PreSnapRuntime): void {
 
 export function menuOpen(s: PreSnapRuntime): boolean {
   return (
-    s.audible !== null && (s.audible.state === 'AUDIBLE_MENU' || s.audible.state === 'NASTY_MENU')
+    s.audible !== null &&
+    (s.audible.state === 'AUDIBLE_MENU' ||
+      s.audible.state === 'NASTY_MENU' ||
+      s.audible.state === 'REF_MENU')
   );
 }
 
@@ -96,8 +99,8 @@ export function routePreSnapButton(
   if (button === 'START') return 'HANDLED';
   const wasOpen = menuOpen(s);
   if (button === 'C' && !wasOpen) return 'HIKE';
-  // D2 hook — ticket 2 opens REF_MENU here (B from IDLE).
-  if (!wasOpen && button !== 'A') return 'HANDLED';
+  // From IDLE: A opens the audible menu, B opens the ref menu (D2).
+  if (!wasOpen && button !== 'A' && button !== 'B') return 'HANDLED';
   const ctl = ensureController(s);
   if (!ctl) return 'HANDLED';
   const sel = ctl.press(button);
@@ -119,6 +122,7 @@ export function routePreSnapButton(
   } else if (sel.kind === 'NASTY') {
     resolveNasty(s, sel.nasty);
   }
+  // CANCEL (ref menu C) simply closes the menu: resetRouter already ran.
   return 'HANDLED';
 }
 
@@ -141,6 +145,18 @@ function resolveNasty(s: PreSnapRuntime, kind: NastyKind): void {
     kind === 'BRIBE_REF' || kind === 'KILL_REF' || s.session.effects.active.includes(kind);
   if (live) setNotice(s, `NASTY! ${name}`, 'call');
   else setNotice(s, `${name} FIZZLED — WRONG PLAY TYPE`, 'refuse');
+}
+
+/**
+ * The CPU coach arms its nasty through the same sim path (and the same once-per-half
+ * charges) as the human, then announces it on the callout. Returns true if accepted.
+ * The caller re-primes the field effects (`prepareLivePlay`) after selecting plays.
+ */
+export function cpuCallNasty(s: PreSnapRuntime, team: TeamId, kind: NastyKind): boolean {
+  const res = s.session.callNasty(team, kind);
+  if (!res.ok) return false;
+  setNotice(s, `CPU NASTY! ${NASTY_INFO[kind].name.toUpperCase()}`, 'call');
+  return true;
 }
 
 /** Per-frame PRE_SNAP update: count the menu timeout, then route this frame's edges. */
