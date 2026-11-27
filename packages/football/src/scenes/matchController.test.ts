@@ -189,6 +189,58 @@ describe('MatchController CPU offense cycle', () => {
     expect(s.isKickPlay).toBe(true);
   });
 
+  it('advances the period when the between-plays clock expires in the huddle (QA freeze)', () => {
+    // QA gate defect: tickPlayClock ends the quarter with no banner to carry it, so the
+    // session sat in QUARTER_END and the scene kept running a dead down forever.
+    const g = awaySession();
+    g.clockRunning = true;
+    g.clock = 1;
+    const s = makeRuntime(g);
+    const c = new MatchController(s);
+
+    g.tickPlayClock(2);
+    expect(g.phase).toBe('QUARTER_END');
+
+    c.updateMode(0);
+    expect(g.quarter).toBe(2);
+    expect(g.phase).toBe('HUDDLE_PLAYCALL');
+    expect(s.mode).toBe('PICK');
+    expect(s.gameOver).toBe(false);
+  });
+
+  it('winds through halftime (kickoff included) when the clock expires in Q2', () => {
+    const g = awaySession();
+    g.quarter = 2;
+    g.clockRunning = true;
+    g.clock = 1;
+    const s = makeRuntime(g);
+    g.tickPlayClock(2);
+    expect(g.phase).toBe('HALFTIME');
+
+    new MatchController(s).updateMode(0);
+    expect(g.quarter).toBe(3);
+    expect(g.phase).toBe('HUDDLE_PLAYCALL');
+    expect(s.mode).toBe('PICK');
+  });
+
+  it('shows the result card when the final clock expires between plays', () => {
+    const g = awaySession();
+    g.quarter = 4;
+    g.clockRunning = true;
+    g.clock = 1;
+    const s = makeRuntime(g);
+    g.tickPlayClock(2);
+    expect(g.phase).toBe('GAME_OVER');
+
+    new MatchController(s).updateMode(0);
+    expect(s.gameOver).toBe(true);
+    expect(s.mode).toBe('BANNER');
+    // Idempotent: a second frame must not re-run the wind-down.
+    s.bannerTimer = 5;
+    new MatchController(s).updateMode(0.1);
+    expect(s.bannerTimer).toBeLessThan(5);
+  });
+
   it('the human A/B/C never calls the CPU play (CPU path ignores pressed buttons)', () => {
     const s = makeRuntime(awaySession());
     const c = new MatchController(s);

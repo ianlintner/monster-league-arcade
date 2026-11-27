@@ -158,7 +158,25 @@ export function updateBanner(s: MatchRuntime, dt: number): void {
   // GAME_OVER; `dismissBanner()` throws outside PLAY_OVER_BANNER, so only dismiss
   // when a play-over banner is actually pending.
   if (s.session.phase === 'PLAY_OVER_BANNER') s.session.dismissBanner();
+  settleToNextHuddle(s);
+}
 
+/**
+ * The between-plays game clock (`GameSession.tickPlayClock`) can expire a quarter while the
+ * scene is still in a huddle / pre-snap — no banner follows, so `updateBanner` never runs
+ * and the session would sit in QUARTER_END / HALFTIME (or an unrendered GAME_OVER) forever,
+ * freezing the match. Run the same wind-down here. Returns true when it acted.
+ */
+export function settleExpiredPeriod(s: MatchRuntime): boolean {
+  const phase = s.session.phase;
+  const expired =
+    phase === 'QUARTER_END' || phase === 'HALFTIME' || (phase === 'GAME_OVER' && !s.gameOver);
+  if (!expired) return false;
+  settleToNextHuddle(s);
+  return true;
+}
+
+function settleToNextHuddle(s: MatchRuntime): void {
   // Collapse extra-point / kickoff / period wind-downs to the next huddle. A
   // quarter-ending snap transitions to QUARTER_END or HALFTIME, which need an
   // explicit `advancePeriod()` (its halftime kickoff then resolves through this
