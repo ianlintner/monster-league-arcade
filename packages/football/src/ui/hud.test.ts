@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { FACTIONS } from '@monster-league/shared-core';
 import { CARNAGE_LIMIT } from '../sim/Roster';
 import {
   bannerKindForText,
@@ -42,6 +43,21 @@ describe('GSN 66.6 Scorebug', () => {
     expect(el.querySelector('.gsn-scorebug__playclock')?.textContent).toContain('21');
   });
 
+  it('uses sprite-palette jersey colours for the team swatches', () => {
+    const el = buildScorebug(state());
+    const swatches = [...el.querySelectorAll<HTMLElement>('[data-swatch]')];
+    expect(swatches).toHaveLength(2);
+    for (const faction of FACTIONS) {
+      const bug = buildScorebug(state({ home: { faction: faction.id, score: 0, casualties: 0 } }));
+      const swatch = bug.querySelector<HTMLElement>('.gsn-scorebug__crest');
+      expect(swatch?.getAttribute('data-swatch')).toBe(faction.colors.jersey);
+    }
+    // Reapers/Deadskins "primary" is skin/olive, not the jersey on the sprite.
+    expect(swatches[0]?.getAttribute('data-swatch')).toBe(
+      FACTIONS.find((f) => f.id === 'reapers')?.colors.jersey,
+    );
+  });
+
   it('lights one casualty skull per team toward the carnage limit', () => {
     const el = buildScorebug(state());
     const home = el.querySelector('[data-testid="skulls-home"]')!;
@@ -69,10 +85,10 @@ describe('GSN 66.6 Scorebug', () => {
   });
 
   it('shows down & distance plus ball position', () => {
-    expect(downDistanceLabel(3, 8)).toBe('3RD & 8');
+    expect(downDistanceLabel(3, 8)).toBe('3RD / 8');
     expect(losLabel(62, 'home')).toBe('BALL ON OPP 38');
     const el = buildScorebug(state());
-    expect(el.querySelector('.gsn-scorebug__down')?.textContent).toBe('3RD & 8');
+    expect(el.querySelector('.gsn-scorebug__down')?.textContent).toBe('3RD / 8');
   });
 
   it('describes field position relative to the team with the ball', () => {
@@ -92,8 +108,8 @@ describe('GSN 66.6 Scorebug', () => {
   });
 
   it('rounds yardage for display and prints INCHES under a yard', () => {
-    expect(downDistanceLabel(2, 10.901356182310463)).toBe('2ND & 11');
-    expect(downDistanceLabel(1, 0.4)).toBe('1ST & INCHES');
+    expect(downDistanceLabel(2, 10.901356182310463)).toBe('2ND / 11');
+    expect(downDistanceLabel(1, 0.4)).toBe('1ST / INCHES');
     expect(losLabel(74.90135618231047, 'home')).toBe('BALL ON OPP 25');
   });
 

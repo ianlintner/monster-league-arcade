@@ -74,7 +74,7 @@ export interface PresentScene {
   liveLos: number;
   liveElapsed: number;
   renderDt: number; // animTime reads it; the scene sets it each update()
-  session: { ref: { kind: 'NECRO_REF' | 'DEMON_REF' }; possession: 'home' | 'away' };
+  session: { ref: { kind: 'NECRO_REF' | 'DEMON_REF' }; possession: 'home' | 'away'; los: number };
   isPassPlay: boolean;
   windowsOpen: boolean;
   passingUntil: number;
@@ -105,10 +105,20 @@ export interface PresentScene {
   looseBall: { x: number; y: number; ttl: number } | null;
 }
 
+/** Read-only ball presentation state for the readability e2e seam. */
+export interface BallMarker {
+  kind: 'SPOT' | 'HELD' | 'FLIGHT' | 'LOOSE';
+  px: number;
+  py: number;
+  scale: number;
+  visible: boolean;
+}
+
 /** Render counters the presenter hands back for the scene to store. */
 export interface ActorRenderResult {
   spriteBackedActorCount: number;
   carrierScreen: { px: number; py: number; scale: number } | null;
+  ballMarker: BallMarker | null;
 }
 
 /** Transient overlays the presenter re-assigns (ttl filter / loose-ball clear). */
@@ -116,6 +126,7 @@ export interface OverlayRenderResult {
   damagePopups: PresentScene['damagePopups'];
   casualties: PresentScene['casualties'];
   looseBall: PresentScene['looseBall'];
+  ballMarker: BallMarker | null;
 }
 
 export class ActorPresenter {
@@ -134,7 +145,7 @@ export class ActorPresenter {
     // Clear it here too so a banner→huddle transition (`live = null`) cannot leave
     // the previous down's scrimmage line / carrier ring frozen on the field.
     scene.groundGfx.clear();
-    if (!scene.live) return { spriteBackedActorCount: 0, carrierScreen: null };
+    if (!scene.live) return { spriteBackedActorCount: 0, carrierScreen: null, ballMarker: null };
 
     const los = scene.liveLos;
     // Resolve the highlighted defender's id once (B cycles index 0..6).
@@ -162,6 +173,15 @@ export class ActorPresenter {
     const carrierActor = actors.find((a) => a.isCarrier) ?? null;
     const carrierScreen = carrierActor
       ? { px: carrierActor.px, py: carrierActor.py, scale: carrierActor.scale }
+      : null;
+    const ballMarker: BallMarker | null = carrierScreen
+      ? {
+          kind: 'HELD',
+          px: carrierScreen.px,
+          py: carrierScreen.py - 12 * carrierScreen.scale,
+          scale: carrierScreen.scale,
+          visible: scene.ballHolderId !== null && !scene.ballFlight,
+        }
       : null;
 
     // Ground indicators render under every actor. The LOS/first-down lines and
@@ -196,13 +216,14 @@ export class ActorPresenter {
 
     // Passing windows float over eligible receivers while open (pass play).
     if (scene.isPassPlay && scene.windowsOpen && !scene.ballFlight) this.drawPassWindows(scene);
-    return { spriteBackedActorCount, carrierScreen };
+    return { spriteBackedActorCount, carrierScreen, ballMarker };
   }
 
   /** Draw the frame overlays (in-flight ball, popups, casualties, loose ball,
    *  kick meter). Faithful port of MatchScene.drawOverlays(dt). */
   renderOverlays(scene: PresentScene, dt: number): OverlayRenderResult {
     const g = scene.indicatorGfx;
+    let ballMarker: BallMarker | null = null;
 
     // Ball in flight: ellipse shadow on the turf + ball offset up by z.
     if (scene.ballFlight) {
@@ -215,10 +236,13 @@ export class ActorPresenter {
       const z = apex * 4 * tt * (1 - tt);
       const f = projectActor(px, py, scene.liveLos);
       const s = projectToScreen(f.x, f.y, z);
-      g.fillStyle(0x000000, 0.35);
-      g.fillEllipse(s.x, s.y + z, 7 * s.scale, 4 * s.scale);
+      g.fillStyle(toPhaserColor('VOID_BLACK'), 0.45);
+      g.fillEllipse(s.x, s.y + z, 12 * s.scale, 7 * s.scale);
       g.fillStyle(toPhaserColor('PUMPKIN_ORANGE'), 1);
-      g.fillEllipse(s.x, s.y, 4 * s.scale, 4 * s.scale);
+      g.fillEllipse(s.x, s.y, 6 * s.scale, 6 * s.scale);
+      g.lineStyle(2, toPhaserColor('BONE_WHITE'), 0.95);
+      g.strokeEllipse(s.x, s.y, 11 * s.scale, 11 * s.scale);
+      ballMarker = { kind: 'FLIGHT', px: s.x, py: s.y, scale: s.scale, visible: true };
     }
 
     // Damage numbers, rising and fading (x/y are cached screen coords).
@@ -268,15 +292,34 @@ export class ActorPresenter {
     }
     const casualties = scene.casualties.filter((c) => c.ttl > 0);
 
-    // Loose ball: a bouncing amber orb at the recovery spot.
+    // Loose ball: a bouncing amber orb at the recovery spot, ringed for readability.
     let looseBall = scene.looseBall;
     if (looseBall) {
       const lb = looseBall;
       const bounce = Math.abs(Math.sin(lb.ttl * 8)) * 6;
+      g.fillStyle(toPhaserColor('VOID_BLACK'), 0.45);
+      g.fillEllipse(lb.x, lb.y, 12, 7);
       g.fillStyle(toPhaserColor('HELLFIRE_AMBER'), 1);
-      g.fillEllipse(lb.x, lb.y - bounce, 5, 5);
+      g.fillEllipse(lb.x, lb.y - bounce, 7, 7);
+      g.lineStyle(2, toPhaserColor('BONE_WHITE'), 0.95);
+      g.strokeEllipse(lb.x, lb.y - bounce, 12, 12);
+      ballMarker = { kind: 'LOOSE', px: lb.x, py: lb.y - bounce, scale: 1, visible: true };
       lb.ttl -= dt;
       if (lb.ttl <= 0) looseBall = null;
+    }
+
+    // Pre-snap / play-select: a visible amber spot at the LOS centre so the ball
+    // is never invisible before the carrier exists. Fades out once live.
+    if (!ballMarker && !scene.ballHolderId) {
+      const s = projectToScreen(10 + (scene.live ? scene.liveLos : scene.session.los), 26.5);
+      const pulse = 8 + Math.sin(scene.liveElapsed * 6) * 1.5;
+      g.fillStyle(toPhaserColor('VOID_BLACK'), 0.5);
+      g.fillEllipse(s.x, s.y, 18 * s.scale, 10 * s.scale);
+      g.fillStyle(toPhaserColor('PUMPKIN_ORANGE'), 1);
+      g.fillEllipse(s.x, s.y, 6 * s.scale, 6 * s.scale);
+      g.lineStyle(2, toPhaserColor('BONE_WHITE'), 0.9);
+      g.strokeEllipse(s.x, s.y, pulse * s.scale, pulse * s.scale);
+      ballMarker = { kind: 'SPOT', px: s.x, py: s.y, scale: s.scale, visible: true };
     }
 
     // Kick meter: a horizontal sweep bar with a centre sweet band, shown during
@@ -307,7 +350,7 @@ export class ActorPresenter {
       g.fillStyle(toPhaserColor('BONE_WHITE'), 1);
       g.fillRect(mx - 3, y - 7, 6, 14);
     }
-    return { damagePopups, casualties, looseBall };
+    return { damagePopups, casualties, looseBall, ballMarker };
   }
 
   // ------------------------------------------------------------ private draw
@@ -407,12 +450,16 @@ export class ActorPresenter {
     depth: number,
     ballInArtwork = false,
   ): void {
-    const hw = 3 * scale;
-    const hh = 2 * scale;
+    const hw = 5 * scale;
+    const hh = 3 * scale;
     if (!ballInArtwork) {
       const g = scene.add.graphics();
+      g.fillStyle(toPhaserColor('VOID_BLACK'), 0.55);
+      g.fillEllipse(px, py, hw * 2 + 4, hh * 2 + 4);
       g.fillStyle(toPhaserColor('HELLFIRE_AMBER'), 1);
       g.fillEllipse(px, py, hw * 2, hh * 2);
+      g.lineStyle(2, toPhaserColor('BONE_WHITE'), 0.95);
+      g.strokeEllipse(px, py, hw * 2 + 3, hh * 2 + 3);
       g.lineStyle(1, toPhaserColor('BONE_WHITE'), 0.9);
       g.lineBetween(px - hw, py, px + hw, py);
       g.lineBetween(px - hw * 0.4, py - hh, px - hw * 0.4, py + hh);
@@ -421,6 +468,13 @@ export class ActorPresenter {
       scene.actorsLayer.add(g);
     }
 
+    // Ground highlight under the holder: a high-contrast ring + amber dot so the
+    // ball's location is unambiguous at 1280x720 even among 14 sprites.
+    const mark = scene.groundGfx;
+    mark.lineStyle(2, toPhaserColor('PUMPKIN_ORANGE'), 0.95);
+    mark.strokeEllipse(px, groundPy, 26 * scale, 10 * scale);
+    mark.fillStyle(toPhaserColor('HELLFIRE_AMBER'), 0.9);
+    mark.fillEllipse(px, groundPy, 6 * scale, 4 * scale);
     const shadow = scene.add.ellipse(px, groundPy, hw, 2 * scale, 0x000000, 0.3);
     shadow.setDepth(depth - 0.5);
     scene.actorsLayer.add(shadow);

@@ -36,6 +36,18 @@ describe('AICoach situational playcalling', () => {
     expect(getKind(d.offensePlayId)).toBe('RUN');
   });
 
+  it('never returns undefined for a real session’s fractional yardage', () => {
+    for (const over of [
+      { down: 3, yardsToGo: 2.086907670060389, los: 97.91309232993962 },
+      { down: 2, yardsToGo: 5.37, los: 63.42 },
+      { down: 4, yardsToGo: 1.5, los: 97.91309232993962 },
+    ]) {
+      const d = decideCoachPlay(sit(over));
+      expect(() => getOffensePlay(d.offensePlayId)).not.toThrow();
+      expect(d.offensePlayId).not.toBe('');
+    }
+  });
+
   it('passes on 3rd & long and prefers a deep route when trailing', () => {
     const base = decideCoachPlay(sit({ down: 3, yardsToGo: 12 }));
     expect(getKind(base.offensePlayId)).toBe('PASS');

@@ -9,7 +9,7 @@
  * `fieldTextures`, so this module stays unit-testable without booting Phaser.
  */
 import { projectToScreen, toPhaserColor } from '@monster-league/shared-core';
-import { yardNumberLabel } from './fieldTextures';
+import { yardNumberCells, yardNumberLabel } from './fieldTextures';
 import type { DrawSurface } from './drawSurface';
 
 export type { DrawSurface } from './drawSurface';
@@ -111,6 +111,29 @@ export function drawField(g: DrawSurface): void {
   g.fillTriangle(0, 0, tlOut.x, tlOut.y, blOut.x, blOut.y);
   // Top-right wedge: (640,0) → (far-right) → (near-right).
   g.fillTriangle(FIELD_CANVAS_WIDTH, 0, trOut.x, trOut.y, brOut.x, brOut.y);
+
+  // Arena stands inside those wedges: tiered iron-bezel terraces + sparse
+  // pumpkin floodlights. This fills the "black void beside the end zone" with
+  // readable stadium structure instead of an unlit triangular gap.
+  const stands = (
+    cornerX: number,
+    far: { x: number; y: number },
+    near: { x: number; y: number },
+  ) => {
+    for (let i = 1; i <= 6; i++) {
+      const t = i / 7;
+      const ax = cornerX + (far.x - cornerX) * t;
+      const ay = far.y * t;
+      const bx = cornerX + (near.x - cornerX) * t;
+      const by = near.y * t;
+      g.lineStyle(1, toPhaserColor('IRON_BEZEL'), 0.8);
+      g.lineBetween(ax, ay, bx, by);
+      g.fillStyle(toPhaserColor('PUMPKIN_ORANGE'), 0.35);
+      g.fillRect(ax - 1, ay - 1, 3, 2);
+    }
+  };
+  stands(0, tlOut, blOut);
+  stands(FIELD_CANVAS_WIDTH, trOut, brOut);
 
   // Solid sideline borders on all four field edges so the bands read cleanly
   // against the surround (no clipped/detached edges).
@@ -214,70 +237,33 @@ function drawYardNumber(g: DrawSurface, x: number): void {
   drawBlockText(g, label, bot.x, bot.y, bot.scale);
 }
 
-/** A cheap 3x5 pixel digit drawn as filled cells (only 0..9 needed). */
+/** A cheap 3x5 pixel digit drawn as filled cells (only 0..9 needed). Cells come
+ *  from the tested projection helper so both sidelines read upright; there is no
+ *  dark plaque — the 1px #0B0711 outline is drawn per cell, directly on the turf. */
 function drawBlockText(g: DrawSurface, text: string, cx: number, cy: number, s: number): void {
-  const glyphs: Record<string, number> = {
-    '0': 0x7b6f,
-    '1': 0x1249,
-    '2': 0x73e7,
-    '3': 0x73cf,
-    '4': 0x5bc9,
-    '5': 0x79cf,
-    '6': 0x79ef,
-    '7': 0x7249,
-    '8': 0x7bef,
-    '9': 0x7bcf,
-  };
   const cw = Math.max(3, 4 * s);
   const ch = Math.max(5, 6 * s);
   const gap = Math.max(1, s);
-  // Render every digit, offsetting each glyph to the right, so "10"/"40" show
-  // both characters instead of only the leading one.
   const total = text.length * (cw * 3) + (text.length - 1) * gap;
   const xBase = cx - total / 2;
-  const y0 = cy - ch / 2;
-  // 1px #0B0711 outline so the digits read clearly over the turf/yard lines.
-  const outline = Math.max(1, Math.round(s));
-  // The yard numbers at x=15,25,… coincide with the *minor* lines drawn every
-  // five yards, so those lines run straight through the label and peek between
-  // the digit cells (a per-cell outline can't hide a line inside a glyph gap).
-  // Lay a VOID_BLACK panel over the label's full bounds — including the outline
-  // and a hair of padding — so the crossing line is masked around the whole
-  // number, not just the lit cells. VOID_BLACK is the outline colour, so the
-  // panel reads as the number's dark plaque rather than a stray turf patch.
-  // Each digit occupies five glyph rows vertically (`y0 + row * ch`), so the
-  // panel must be `5 * ch` tall to cover the lower rows' glyph gaps — not `ch`,
-  // which masks only the top row and lets the minor line peek through below.
-  const pad = Math.max(1, Math.round(s * 2));
-  g.fillStyle(toPhaserColor('VOID_BLACK'), 1);
-  g.fillRect(
-    xBase - outline - pad,
-    y0 - outline - pad,
-    total + (outline + pad) * 2,
-    5 * ch + (outline + pad) * 2,
-  );
+  // Centre the five glyph rows on the projected label position (the old code
+  // anchored the first row there, pushing the number downfield).
+  const y0 = cy - (5 * ch) / 2;
+  const cells = yardNumberCells(text);
   const draw = (color: number, alpha: number, inset: number) => {
     g.fillStyle(color, alpha);
-    for (let i = 0; i < text.length; i++) {
-      const bits = glyphs[text[i] ?? '0'] ?? 0;
-      const x0 = xBase + i * (cw * 3 + gap);
-      for (let row = 0; row < 5; row++) {
-        for (let col = 0; col < 3; col++) {
-          if (bits & (1 << (row * 3 + col))) {
-            g.fillRect(
-              x0 + col * cw - inset,
-              y0 + row * ch - inset,
-              cw + inset * 2,
-              ch + inset * 2,
-            );
-          }
-        }
-      }
+    for (const cell of cells) {
+      g.fillRect(
+        xBase + cell.digit * (cw * 3 + gap) + cell.col * cw - inset,
+        y0 + cell.row * ch - inset,
+        cw + inset * 2,
+        ch + inset * 2,
+      );
     }
   };
-  // Outline pass (expanded by 1px), then the white fill on top.
-  draw(toPhaserColor('VOID_BLACK'), 1, outline);
-  draw(toPhaserColor('BONE_WHITE'), 0.85, 0);
+  // PLAN.md binding: 1px #0B0711 outline, then the bone fill on top.
+  draw(toPhaserColor('VOID_BLACK'), 1, 1);
+  draw(toPhaserColor('BONE_WHITE'), 0.9, 0);
 }
 
 function drawCrest(g: DrawSurface, cx: number, cy: number, s: number): void {

@@ -60,7 +60,9 @@ export function losLabel(los: number, _possession: 'home' | 'away'): string {
 }
 
 export function downDistanceLabel(down: number, yardsToGo: number): string {
-  return `${ordinal(down)} & ${formatYards(yardsToGo)}`;
+  // The HUD's pixel display font maps `&` to a `$` glyph; use a slash instead so
+  // "3RD & 8" never renders as "3RD $ 8" on the broadcast scorebug.
+  return `${ordinal(down)} / ${formatYards(yardsToGo)}`;
 }
 
 function ordinal(n: number): string {
@@ -94,8 +96,11 @@ function crestMarkup(faction: FactionId, className: string): HTMLElement {
   const img = el('span', className);
   // The atlas holds a crest keyed by faction id; fall back to a colour swatch when
   // no image asset is available so tests and headless renders stay deterministic.
+  // The swatch uses the exact jersey colour from the sprite palette, not the
+  // faction's "primary" (which is skin for Reapers/Deadskins).
   img.setAttribute('data-crest', f?.id ?? faction);
-  img.style.background = f?.colors.primary ?? 'transparent';
+  img.setAttribute('data-swatch', f?.colors.jersey ?? 'transparent');
+  img.style.background = f?.colors.jersey ?? 'transparent';
   return img;
 }
 

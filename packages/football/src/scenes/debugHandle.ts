@@ -28,6 +28,14 @@ export interface DebugHandleSurface {
   hazardManager: () => HazardManager | null;
   spriteBackedActorCount: () => number;
   carrierScreen: () => { px: number; py: number; scale: number } | null;
+  /** Read-only position/kind of the last-rendered ball marker. */
+  ballMarker: () => {
+    kind: 'SPOT' | 'HELD' | 'FLIGHT' | 'LOOSE';
+    px: number;
+    py: number;
+    scale: number;
+    visible: boolean;
+  } | null;
   camZoom: () => number;
   bannerKind: () => string;
   audio: () => { muted: boolean; unlocked: boolean };
@@ -164,6 +172,10 @@ export function installDebugHandle(s: DebugHandleSurface): void {
       const c = carrierScreen();
       if (!c) return null;
       return { px: c.px, py: c.py, scale: c.scale, camZoom: camZoom() };
+    },
+    /** Read-only ball marker for the field-readability e2e; never mutates play. */
+    get ballMarker() {
+      return s.ballMarker();
     },
     pick: (i: number) => {
       const clamped = Math.max(0, Math.min(2, Number(i) || 0));

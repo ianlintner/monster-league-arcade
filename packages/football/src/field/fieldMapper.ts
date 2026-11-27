@@ -43,6 +43,40 @@ export function toLiveWaypoint(wp: Waypoint): LiveWaypoint {
   return { x: wp.y, y: wp.x };
 }
 
+/** Minimum lateral gap (yards) between adjacent pre-snap actors. The catalog's
+ *  I-form stacked QB/RB on the same x, which projects to one unreadable column. */
+export const MIN_FORMATION_LATERAL_SPACING = 3;
+
+/**
+ * Spread a formation laterally so no two adjacent slots share a lane. Pure and
+ * deterministic: keeps the original left-to-right order and centre of mass, and
+ * leaves downfield (`y`) coordinates untouched so route timing is unchanged.
+ * Applied to every offense/defense catalog formation in `buildLivePlayInput`.
+ */
+export function spreadFormationLaterally<S extends string>(
+  positions: Record<S, Waypoint>,
+): Record<S, Waypoint> {
+  const slots = Object.keys(positions) as S[];
+  if (slots.length === 0) return positions;
+  const sorted = slots.slice().sort((a, b) => positions[a]!.x - positions[b]!.x);
+  const spread = new Map<S, number>();
+  let previous = -Infinity;
+  for (const slot of sorted) {
+    const x = Math.max(positions[slot]!.x, previous + MIN_FORMATION_LATERAL_SPACING);
+    spread.set(slot, x);
+    previous = x;
+  }
+  const mean = (values: number[]) => values.reduce((sum, v) => sum + v, 0) / values.length;
+  const shift =
+    mean(slots.map((slot) => positions[slot]!.x)) - mean(slots.map((slot) => spread.get(slot)!));
+  return Object.fromEntries(
+    slots.map((slot) => [
+      slot,
+      { ...positions[slot]!, x: Math.round((spread.get(slot)! + shift) * 100) / 100 },
+    ]),
+  ) as Record<S, Waypoint>;
+}
+
 const OFFENSE_TO_LIVE: Record<OffenseSlot, string> = {
   QB: 'QB',
   RB1: 'RB1',
@@ -74,12 +108,14 @@ export function buildLivePlayInput(
   const offense = session.possession;
   const defense = session.defense;
 
+  const offPositions = spreadFormationLaterally(OFFENSE_FORMATIONS[offPlay.formation].positions);
+  const defPositions = spreadFormationLaterally(DEFENSE_FORMATIONS[defPlay.formation].positions);
   const actors: LiveActorSpec[] = [];
 
   // Offense actors.
   for (const slot of OFFENSE_SLOTS) {
     const player: Player = session.roster[offense].player('OFFENSE', slot);
-    const pos = OFFENSE_FORMATIONS[offPlay.formation].positions[slot];
+    const pos = offPositions[slot];
     const id = `${offense}-${slot}`;
     const waypoint = toLiveWaypoint(pos);
     actors.push({
@@ -98,7 +134,7 @@ export function buildLivePlayInput(
   // Defense actors (line up across the LOS).
   for (const slot of DEFENSE_SLOTS) {
     const player: Player = session.roster[defense].player('DEFENSE', slot);
-    const pos = DEFENSE_FORMATIONS[defPlay.formation].positions[slot];
+    const pos = defPositions[slot];
     const id = `${defense}-${slot}`;
     const waypoint = toLiveWaypoint(pos);
     actors.push({

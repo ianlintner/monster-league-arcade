@@ -24,8 +24,9 @@ const mlf = (page: Page): Promise<{ mode: string; down: number }> =>
     return { mode: h?.mode ?? '', down: h?.down ?? 1 };
   });
 
-/** 1ST–4TH ordinal plus INCHES or whole yards — exactly the HUD format, no floats. */
-const DOWN_TEXT = /^(1ST|2ND|3RD|4TH) & (INCHES|[0-9]{1,3})$/;
+/** 1ST–4TH ordinal plus INCHES or whole yards — exactly the HUD format, no floats.
+ *  The broadcast font renders `&` as `$`, so the label uses a slash separator. */
+const DOWN_TEXT = /^(1ST|2ND|3RD|4TH) \/ (INCHES|[0-9]{1,3})$/;
 
 test('real-keyboard drive: four downs each tap, snap, steer, whistle', async ({ page }) => {
   const errors = trackErrors(page);
