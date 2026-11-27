@@ -1,7 +1,13 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import type { ArcadeButton } from '@monster-league/shared-core';
-import { MatchController, DEFAULT_DEFENSE, type MatchRuntime } from './matchController';
+import {
+  MatchController,
+  DEFAULT_DEFENSE,
+  resetMatchPresentation,
+  type MatchRuntime,
+} from './matchController';
 import { updateBanner } from './matchOutcome';
+import { INITIAL_SHAKE, kickShake } from './cameraRig';
 import { GameSession } from '../sim/GameSession';
 import { getOffensePlay } from '../sim/Playbook';
 import { cpuOnOffense } from './cpuOpponent';
@@ -76,6 +82,8 @@ function makeRuntime(session: GameSession): MatchRuntime {
     casualties: [],
     looseBall: null,
     ballHolderId: null,
+    shake: { amplitude: 0, remaining: 0, duration: 0, phase: 0 },
+    forfeitWarned: new Set<string>(),
     playerInput: {
       x: 0,
       y: 0,
@@ -347,5 +355,19 @@ describe('MatchController CPU offense cycle', () => {
     s.cpuSnapClock = 0;
     c.updateMode(0.016);
     expect(s.mode).toBe('LIVE');
+  });
+});
+
+describe('per-match presentation reset', () => {
+  it('clears the forfeit-warning memory and pending shake for a rematch', () => {
+    const s = makeRuntime(new GameSession({ seed: 7 }));
+    s.forfeitWarned.add('home');
+    kickShake(s.shake, 'CASUALTY');
+    expect(s.shake.amplitude).toBeGreaterThan(0);
+
+    resetMatchPresentation(s);
+
+    expect(s.forfeitWarned.size).toBe(0);
+    expect(s.shake).toEqual({ ...INITIAL_SHAKE });
   });
 });

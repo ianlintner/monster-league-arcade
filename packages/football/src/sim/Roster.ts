@@ -213,6 +213,29 @@ export class TeamRoster {
     this.lineup = Array.from({ length: ACTIVE_COUNT }, (_, i) => i);
   }
 
+  /** Test-seam setup: apply N pre-match casualties at construction time using
+   *  the same bench-promotion path as real damage. Capped below the forfeit
+   *  limit so the seam can never start a match already forfeited. Never called
+   *  from the live debug handle. */
+  seedCasualties(count: number): void {
+    const n = Math.max(0, Math.min(CARNAGE_LIMIT - 1, Math.round(count)));
+    for (let i = 0; i < n; i++) {
+      const idx = this.lineup[i];
+      if (idx === undefined) break;
+      const victim = this.players[idx];
+      if (!victim || victim.status === 'DEAD') continue;
+      victim.status = 'DEAD';
+      victim.currentHp = 0;
+      this.casualties += 1;
+      const subIdx = this.players.findIndex((p) => p.status === 'BENCH');
+      if (subIdx >= 0) {
+        const replacement = this.players[subIdx];
+        if (replacement) replacement.status = 'ACTIVE';
+        this.lineup[i] = subIdx;
+      }
+    }
+  }
+
   private index(side: Side, slot: Slot): number {
     const slots: readonly string[] = side === 'OFFENSE' ? OFFENSE_SLOTS : DEFENSE_SLOTS;
     const i = slots.indexOf(slot);

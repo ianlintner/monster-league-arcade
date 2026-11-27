@@ -9,6 +9,8 @@ import type { GameSession, HazardHit } from '../sim/index';
 import { projectActor } from '../field/fieldMapper';
 import { projectToScreen, toPhaserColor } from '@monster-league/shared-core';
 import { detailForKind, type MatchRuntime } from './matchController';
+import { CARNAGE_LIMIT } from '../sim/Roster';
+import { kickShake } from './cameraRig';
 import { bannerKindForText, buildBroadcastBanner, buildResultCard } from '../ui/hud';
 import { resolveScrambleOutcome } from '../field/PlayOrchestrator';
 
@@ -50,7 +52,13 @@ export function collectDamageAndCasualties(s: MatchRuntime): void {
     if (!actor) continue;
     const f = projectActor(actor.x, actor.y, s.liveLos);
     const p = projectToScreen(f.x, f.y);
-    s.casualties.push({ id: actor.id, x: p.x, y: p.y, ttl: 2.0 });
+    s.casualties.push({
+      id: actor.id,
+      x: p.x,
+      y: p.y,
+      ttl: 2.0,
+      label: `${c.name} LIQUIDATED!`,
+    });
     // Presentation: a casualty kills the victim — the sprite plays its death
     // pose while the red/bone bloom settles (Colour commentary handles the rest).
     // Key the presentation state by the resolved *actor id* (a slot id like
@@ -59,6 +67,15 @@ export function collectDamageAndCasualties(s: MatchRuntime): void {
     const pres = s.presentation.get(actor.id) ?? {};
     pres.dead = true;
     s.presentation.set(actor.id, pres);
+  }
+  // One casualty short of an automatic forfeit: warn once per team per match.
+  // The casualty voice from `playResult` already names the fallen player, so the
+  // warning adds an urgent buzzer from the same audio sink rather than a new clip.
+  for (const team of ['home', 'away'] as const) {
+    if (s.session.roster[team].casualties !== CARNAGE_LIMIT - 1) continue;
+    if (s.forfeitWarned.has(team)) continue;
+    s.forfeitWarned.add(team);
+    s.audio?.playForfeitWarning();
   }
   if (r.fumble) {
     const carrier = s.live?.carrier;
@@ -118,6 +135,8 @@ export function commitOutcome(s: MatchRuntime): void {
   const res = s.session.snap(snap as Parameters<GameSession['snap']>[0]);
   showBanner(s, res.banner);
   s.audio?.playResult(res, Boolean(r.tackler));
+  if (r.tackler) kickShake(s.shake, 'TACKLE');
+  if (res.casualties.length > 0) kickShake(s.shake, 'CASUALTY');
   collectDamageAndCasualties(s);
 
   // Presentation for the play-over roll: the tackled carrier drops into a

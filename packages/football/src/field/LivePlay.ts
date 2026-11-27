@@ -173,6 +173,15 @@ const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.m
 const dist = (ax: number, ay: number, bx: number, by: number): number =>
   Math.hypot(bx - ax, by - ay);
 
+/**
+ * Render-frame animation delta: zero while the sim's *single* hit-stop clock
+ * holds every actor still, otherwise the real elapsed frame time. Keeping this
+ * mapping pure lets the hit-stop freeze be unit-tested without a Phaser scene.
+ */
+export function animationDelta(dt: number, hitStopActive: boolean): number {
+  return hitStopActive ? 0 : dt;
+}
+
 export class LivePlay {
   readonly input: LivePlayInput;
   readonly actors: LiveActorState[];
@@ -600,6 +609,13 @@ export class LivePlay {
       this.step(false, false);
     }
     return this.result();
+  }
+
+  /** True while the 60 ms tackle hit-stop is holding the field still. Reads the
+   *  sim's own clock (no per-actor `hitStop` mirror) and avoids cloning the
+   *  actor list just to ask whether animation frames should freeze. */
+  isHitStopActive(): boolean {
+    return this.hitStopRemaining > 0;
   }
 
   snapshot(): LivePlaySnapshot {

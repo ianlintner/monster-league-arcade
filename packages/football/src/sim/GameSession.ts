@@ -35,6 +35,8 @@ export interface GameConfig {
   seed: number;
   /** Seconds per quarter (arcade: 120-180). */
   quarterSeconds: number;
+  /** Pre-match casualties for the home team, used by the `?casualties=` e2e seam. */
+  initialCasualties: number;
   playClockSeconds: number;
   timeoutsPerHalf: number;
   homeFaction: Faction;
@@ -44,6 +46,7 @@ export interface GameConfig {
 export const DEFAULT_CONFIG: GameConfig = {
   seed: 1993,
   quarterSeconds: 150,
+  initialCasualties: 0,
   playClockSeconds: 25,
   timeoutsPerHalf: 3,
   homeFaction: 'REAPERS',
@@ -242,6 +245,7 @@ export class GameSession {
       home: new TeamRoster('home', this.cfg.homeFaction, this.rng),
       away: new TeamRoster('away', this.cfg.awayFaction, this.rng),
     };
+    this.roster.home.seedCasualties(this.cfg.initialCasualties);
     this.clock = this.cfg.quarterSeconds;
     this.playClock = this.cfg.playClockSeconds;
     this.timeouts = { home: this.cfg.timeoutsPerHalf, away: this.cfg.timeoutsPerHalf };

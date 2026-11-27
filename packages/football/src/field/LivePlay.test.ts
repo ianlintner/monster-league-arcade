@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { LIVE_TUNING, LivePlay, type LiveActorSpec, type LivePlayInput } from './LivePlay';
+import {
+  animationDelta,
+  LIVE_TUNING,
+  LivePlay,
+  type LiveActorSpec,
+  type LivePlayInput,
+} from './LivePlay';
 import { buildLivePlayInput } from './fieldMapper';
 import { GameSession } from '../sim/GameSession';
 
@@ -78,6 +84,42 @@ describe('LivePlay movement', () => {
     for (let i = 0; i < 120; i++) lp.advance(); // 2 s
     expect(lp.carrier.stamina).toBeLessThan(1);
     expect(lp.carrier.stamina).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('LivePlay hit-stop', () => {
+  it('exposes the sim-only freeze clock and zeroes render deltas while it runs', () => {
+    const input = makeInput();
+    const defender = input.actors.find((a) => a.id === 'away-DL1')!;
+    defender.x = 0.5;
+    defender.y = -2;
+    input.actors
+      .filter((a) => a.side === 'OFFENSE' && a.id !== 'home-RB1')
+      .forEach((a) => {
+        a.x = 200;
+      });
+    const lp = new LivePlay(input);
+    expect(lp.isHitStopActive()).toBe(false);
+    expect(animationDelta(1 / 60, false)).toBe(1 / 60);
+
+    let froze = false;
+    for (let i = 0; i < 60; i++) {
+      lp.advance();
+      if (!lp.isHitStopActive()) continue;
+      froze = true;
+      const x = lp.carrier.x;
+      lp.advance();
+      expect(lp.carrier.x).toBe(x); // actors held still by LivePlay's one clock
+      expect(animationDelta(1 / 60, lp.isHitStopActive())).toBe(0);
+      break;
+    }
+    expect(froze).toBe(true);
+
+    for (let i = 0; i < 10; i++) lp.advance();
+    expect(lp.isHitStopActive()).toBe(false);
+    expect(lp.result().outcome.kind).toBe('WHISTLE');
+    expect(animationDelta(1 / 60, false)).toBe(1 / 60);
+    expect(LIVE_TUNING.hitStopSeconds).toBeGreaterThan(0);
   });
 });
 

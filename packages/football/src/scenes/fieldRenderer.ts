@@ -10,26 +10,10 @@
  */
 import { projectToScreen, toPhaserColor } from '@monster-league/shared-core';
 import { yardNumberLabel } from './fieldTextures';
-import type { HazardManager } from '../field/HazardManager';
+import type { DrawSurface } from './drawSurface';
 
-/** Phaser 4 Graphics draw surface (narrowed to the methods the renderer uses). */
-export interface DrawSurface {
-  fillStyle(color: number, alpha?: number): unknown;
-  lineStyle(width: number, color: number, alpha?: number): unknown;
-  fillRect(x: number, y: number, w: number, h: number): unknown;
-  fillEllipse(x: number, y: number, rx: number, ry: number): unknown;
-  fillTriangle(x1: number, y1: number, x2: number, y2: number, x3: number, y3: number): unknown;
-  strokeEllipse(x: number, y: number, rx: number, ry: number): unknown;
-  arc(
-    x: number,
-    y: number,
-    r: number,
-    start: number,
-    end: number,
-    anticlockwise?: boolean,
-  ): unknown;
-  lineBetween(x1: number, y1: number, x2: number, y2: number): unknown;
-}
+export type { DrawSurface } from './drawSurface';
+export { drawHazards, hazardStateKey } from './hazardRenderer';
 
 export const FIELD_CANVAS_WIDTH = 640;
 export const FIELD_CANVAS_HEIGHT = 360;
@@ -320,80 +304,4 @@ function drawGoalpost(g: DrawSurface, base: { x: number; y: number; scale: numbe
   g.fillRect(base.x - w - u / 2, base.y - h - u, u, h); // left upright
   g.fillRect(base.x + w - u / 2, base.y - h - u, u, h); // right upright
   g.fillRect(base.x - w, crossY - u / 2, w * 2, u); // crossbar
-}
-
-/** Redraw the hazard layer when armed state *or* a telegraphed geyser's
- *  countdown changes, so the telegraph fill animates as it approaches eruption
- *  instead of freezing on the arm-state transition alone. */
-export function hazardStateKey(manager: HazardManager): string {
-  return manager
-    .snapshot()
-    .map((h) =>
-      h.kind === 'LAVA_GEYSER' && !h.armed
-        ? `${h.id}:telegraph:${Math.round(h.telegraphSeconds * 10)}`
-        : `${h.id}:${h.armed}`,
-    )
-    .join('|');
-}
-
-export function drawHazards(g: DrawSurface, manager: HazardManager): void {
-  // Hazard coords are absolute field-of-play (x∈[0,100], y lat. ±26.66); the
-  // 10-yard end zone offset maps them into projection space.
-  for (const h of manager.snapshot()) {
-    // Lava geysers must be visible during their warning interval (armed=false,
-    // telegraphSeconds > 0) so the player sees the telegraph *before* it erupts —
-    // not only after it is already dangerous. Every other unarmed hazard (a
-    // spent mine, dive-cleared sludge) is legitimately invisible.
-    const telegraphed = h.kind === 'LAVA_GEYSER' && !h.armed && h.telegraphSeconds > 0;
-    if (!h.armed && !telegraphed) continue;
-    const s = projectToScreen(10 + h.x, 26.5 + h.y);
-    switch (h.kind) {
-      case 'TOMBSTONE':
-        g.fillStyle(toPhaserColor('TOMBSTONE_GRAY'), 1);
-        g.fillRect(s.x - 5 * s.scale, s.y - 9 * s.scale, 10 * s.scale, 12 * s.scale);
-        g.lineStyle(1, toPhaserColor('BONE_WHITE'), 0.9);
-        g.lineBetween(s.x - 5 * s.scale, s.y - 9 * s.scale, s.x - 5 * s.scale, s.y - 2 * s.scale);
-        break;
-      case 'OPEN_GRAVE':
-        g.fillStyle(toPhaserColor('VOID_BLACK'), 1);
-        g.fillEllipse(s.x, s.y, 11 * s.scale, 7 * s.scale);
-        g.lineStyle(1, toPhaserColor('TOMBSTONE_GRAY'), 0.9);
-        g.strokeEllipse(s.x, s.y, 11 * s.scale, 7 * s.scale);
-        break;
-      case 'MINE':
-        g.fillStyle(toPhaserColor('PUMPKIN_ORANGE'), 1);
-        g.fillEllipse(s.x, s.y, 6 * s.scale, 6 * s.scale);
-        g.fillStyle(toPhaserColor('ECTO_GREEN'), 1);
-        g.fillRect(s.x - 2 * s.scale, s.y - 3 * s.scale, 4 * s.scale, 2 * s.scale);
-        break;
-      case 'LAVA_GEYSER':
-        // Telegraph: a faint rim + countdown-filling core the player can read
-        // before the eruption. Armed: the full crimson vent.
-        if (telegraphed) {
-          // TelegraphSeconds counts down 1..0; a fuller ring means closer to boom.
-          const frac = 1 - Math.max(0, Math.min(1, h.telegraphSeconds));
-          g.lineStyle(1, toPhaserColor('HELLFIRE_AMBER'), 0.7);
-          g.strokeEllipse(s.x, s.y, 8 * s.scale, 8 * s.scale);
-          g.fillStyle(toPhaserColor('VAMPIRE_CRIMSON'), 0.2 + 0.25 * frac);
-          g.fillEllipse(
-            s.x,
-            s.y,
-            5 * s.scale * (0.4 + 0.6 * frac),
-            5 * s.scale * (0.4 + 0.6 * frac),
-          );
-        } else {
-          g.fillStyle(toPhaserColor('VAMPIRE_CRIMSON'), 0.9);
-          g.fillEllipse(s.x, s.y, 8 * s.scale, 8 * s.scale);
-        }
-        break;
-      case 'BOG':
-      case 'SLUDGE':
-        g.fillStyle(
-          h.kind === 'BOG' ? toPhaserColor('ECTO_GREEN') : toPhaserColor('IRON_BEZEL'),
-          0.4,
-        );
-        g.fillEllipse(s.x, s.y, 12 * s.scale, 9 * s.scale);
-        break;
-    }
-  }
 }

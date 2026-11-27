@@ -19,6 +19,7 @@ import {
 } from '../ui/hud';
 import type { FactionId } from '@monster-league/shared-core';
 import type { GameSession, NastyKind } from '../sim/index';
+import { CARNAGE_LIMIT } from '../sim/Roster';
 import { NASTY_INFO, getOffensePlay, nastyMenu } from '../sim/index';
 import { HUMAN_TEAM } from './preSnapRouter';
 
@@ -166,9 +167,18 @@ export function syncHud(doc: Document, session: GameSession): void {
     const row = root.querySelector(`[data-testid="skulls-${side}"]`);
     if (!row) continue;
     const count = s.roster[side].casualties;
-    Array.from(row.children).forEach((skull, i) => {
+    const warning = count === CARNAGE_LIMIT - 1;
+    if (warning) row.setAttribute('data-warning', 'forfeit');
+    else row.removeAttribute('data-warning');
+    row.setAttribute(
+      'aria-label',
+      warning ? `${count} casualties — 1 more = forfeit` : `${count} casualties`,
+    );
+    row.querySelectorAll('.gsn-skull').forEach((skull, i) => {
       skull.setAttribute('data-lit', String(i < count));
     });
+    const label = row.querySelector<HTMLElement>('.gsn-skulls__warning');
+    if (label) label.hidden = !warning;
   }
 
   const playclock = root.querySelector('.gsn-scorebug__playclock');

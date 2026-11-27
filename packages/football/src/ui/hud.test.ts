@@ -51,6 +51,23 @@ describe('GSN 66.6 Scorebug', () => {
     expect(away.querySelectorAll('[data-lit="true"]')).toHaveLength(3);
   });
 
+  it('warns of forfeit at exactly one casualty short of the limit', () => {
+    const safe = buildScorebug(
+      state({ home: { faction: 'reapers', score: 0, casualties: CARNAGE_LIMIT - 2 } }),
+    ).querySelector('[data-testid="skulls-home"]')!;
+    expect(safe.hasAttribute('data-warning')).toBe(false);
+    expect(safe.querySelector<HTMLElement>('.gsn-skulls__warning')!.hidden).toBe(true);
+
+    const warn = buildScorebug(
+      state({ home: { faction: 'reapers', score: 0, casualties: CARNAGE_LIMIT - 1 } }),
+    ).querySelector('[data-testid="skulls-home"]')!;
+    expect(warn.getAttribute('data-warning')).toBe('forfeit');
+    const label = warn.querySelector<HTMLElement>('.gsn-skulls__warning')!;
+    expect(label.hidden).toBe(false);
+    expect(label.textContent).toBe('1 MORE = FORFEIT');
+    expect(warn.getAttribute('aria-label')).toContain('1 more = forfeit');
+  });
+
   it('shows down & distance plus ball position', () => {
     expect(downDistanceLabel(3, 8)).toBe('3RD & 8');
     expect(losLabel(62, 'home')).toBe('BALL ON OPP 38');

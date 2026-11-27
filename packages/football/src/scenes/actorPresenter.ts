@@ -101,7 +101,7 @@ export interface PresentScene {
   presentation: Map<string, ActorPresentationState>;
   // -- transient lists (MUTATED in place / re-assigned by renderOverlays) -----
   damagePopups: { x: number; y: number; text: string; color: number; ttl: number }[];
-  casualties: { id: string; x: number; y: number; ttl: number }[];
+  casualties: { id: string; x: number; y: number; ttl: number; label?: string }[];
   looseBall: { x: number; y: number; ttl: number } | null;
 }
 
@@ -246,6 +246,24 @@ export class ActorPresenter {
       g.fillEllipse(c.x, c.y, 18 * (1 - c.ttl / 2.0), 18 * (1 - c.ttl / 2.0));
       g.fillStyle(toPhaserColor('BONE_WHITE'), a);
       g.fillEllipse(c.x, c.y, 8, 8);
+      // In-canvas callout: the broadcast banner names the event globally, this
+      // one names the victim at the spot they went down. Clamped inside the
+      // 640x360 canvas so it stays readable at 1280x720 (2x integer scale).
+      if (c.label) {
+        const hex = `#${toPhaserColor('VAMPIRE_CRIMSON').toString(16).padStart(6, '0')}`;
+        const t = scene.add
+          .text(Math.max(112, Math.min(CANVAS_WIDTH - 112, c.x)), Math.max(48, c.y - 26), c.label, {
+            fontFamily: '"Press Start 2P", monospace',
+            fontSize: '10px',
+            color: hex,
+            stroke: '#0B0711',
+            strokeThickness: 3,
+          })
+          .setOrigin(0.5, 1)
+          .setAlpha(a)
+          .setDepth(301);
+        scene.actorsLayer.add(t);
+      }
       c.ttl -= dt;
     }
     const casualties = scene.casualties.filter((c) => c.ttl > 0);

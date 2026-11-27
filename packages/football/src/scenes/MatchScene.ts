@@ -21,8 +21,8 @@ import { GameSession, type AudibleController, type Button, type NastyKind } from
 import { resetNotice, resetRouter, type NastyNoticeKind } from './preSnapRouter';
 import { drawFieldSprites, drawField, drawHazards, hazardStateKey } from './fieldRenderer';
 import type { DrawSurface } from './fieldRenderer';
-import { stepCamera, clampFocus, INITIAL_CAMERA } from './cameraRig';
-import type { CameraState } from './cameraRig';
+import { INITIAL_CAMERA, INITIAL_SHAKE, type CameraState, type CameraShake } from './cameraRig';
+import { presentCamera } from './cameraPresenter';
 import {
   composeReadyLine,
   updateScorebug,
@@ -31,7 +31,7 @@ import {
   syncHuddle,
   syncNastyOverlay,
 } from './hudBridge';
-import type { LivePlay, LivePlayResult } from '../field/LivePlay';
+import { animationDelta, type LivePlay, type LivePlayResult } from '../field/LivePlay';
 import { HazardManager } from '../field/HazardManager';
 import type { NastyFieldEffects } from '../field/NastyFieldEffects';
 import type { HazardHit } from '../sim/GameSession';
@@ -46,9 +46,9 @@ import {
 } from './spriteRenderer';
 import { ActorPresenter, type PresentScene } from './actorPresenter';
 import { installDebugHandle, type DebugHandleSurface } from './debugHandle';
-import { MatchController } from './matchController';
+import { MatchController, resetMatchPresentation } from './matchController';
 import { cpuOnOffense } from './cpuOpponent';
-import { quarterSecondsFromSearch } from './matchConfig';
+import { quarterSecondsFromSearch, casualtiesFromSearch } from './matchConfig';
 import { mountOnboarding, type Onboarding } from '../ui/onboarding';
 import { MatchAudio, type AudioSink } from './matchAudio';
 
@@ -202,6 +202,11 @@ export class MatchScene extends Phaser.Scene {
    *  `cameraRig`; this holds only the owned `CameraState` between frames. */
   private camera: CameraState = { ...INITIAL_CAMERA };
 
+  /** Impact camera offset; the math is pure in `cameraRig`, the scene applies it. */
+  shake: CameraShake = { ...INITIAL_SHAKE };
+  /** Teams already warned they are one casualty from an automatic forfeit. */
+  forfeitWarned = new Set<string>();
+
   /** Ball in flight (pass animation) — null when no ball is airborne. */
   ballFlight: {
     fromX: number;
@@ -247,8 +252,7 @@ export class MatchScene extends Phaser.Scene {
 
   constructor() {
     super('match');
-    // The controller holds a back-reference to this scene through `MatchRuntime`;
-    // construct it before exposing the debug handle (which drives the same surface).
+    // The controller holds a scene back-reference; construct before the debug handle.
     this.match = new MatchController(this);
     // Expose the e2e/dev handle as soon as the scene object exists, not in
     // `create()`: Phaser makes the canvas visible at the *start* of `preload`,
@@ -367,6 +371,7 @@ export class MatchScene extends Phaser.Scene {
       homeFaction: 'REAPERS',
       awayFaction: 'DEADSKINS',
       quarterSeconds: quarterSecondsFromSearch(window.location.search),
+      initialCasualties: casualtiesFromSearch(window.location.search),
     });
     session.coinToss('home');
     session.kickoff({ touchback: true });
@@ -414,6 +419,7 @@ export class MatchScene extends Phaser.Scene {
     this.animKind.clear();
     this.presentation.clear();
     this.camera = { ...INITIAL_CAMERA };
+    resetMatchPresentation(this);
     // Force the huddle overlay to rebuild and drop the result card.
     this.huddleFingerprint = '';
     document.getElementById('banner')?.replaceChildren();
@@ -426,7 +432,6 @@ export class MatchScene extends Phaser.Scene {
       return;
     }
     const dt = Math.min(delta, 50) / 1000;
-    this.renderDt = dt;
     this.sampleInput(dt);
 
     // Advance the play clock (and, while running, the between-play game clock).
@@ -461,6 +466,8 @@ export class MatchScene extends Phaser.Scene {
 
     this.match.updateMode(dt);
     this.audio.tick(this.mode);
+    // LivePlay owns the only hit-stop clock; freeze animation frames while it runs.
+    this.renderDt = animationDelta(dt, this.live?.isHitStopActive() ?? false);
     const actors = this.actorPresenter.renderActors(this.renderContext());
     this.spriteBackedActorCount = actors.spriteBackedActorCount;
     this.carrierScreen = actors.carrierScreen;
@@ -479,20 +486,13 @@ export class MatchScene extends Phaser.Scene {
    *  zoom + scroll on `cameras.main` so every world object (turf, lines, actors,
    *  overlays) transforms together without a per-projection rewrite. */
   private updateCamera(dt: number): void {
-    this.camera = stepCamera(this.camera, {
+    this.camera = presentCamera(this.cameras.main, this.camera, this.shake, {
       dt,
       ballFlight: this.ballFlight,
       carrier: this.live?.carrier ?? null,
       los: this.liveLos,
       isPassPlay: this.isPassPlay,
     });
-
-    const cam = this.cameras.main;
-    cam.setZoom(this.camera.zoom);
-    // Clamp the focus to the arena so the view never pans into the VOID_BLACK
-    // surround at the end zones / sidelines (see cameraRig.clampFocus).
-    const focus = clampFocus(this.camera);
-    cam.centerOn(focus.x, focus.y);
   }
 
   // ------------------------------------------------------------- inputs
