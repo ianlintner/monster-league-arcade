@@ -198,8 +198,7 @@ export class MatchController {
       if (this.s.cpuPlayId === null) {
         const decision = cpuCallOffense(this.s.session);
         this.s.cpuPlayId = decision.offensePlayId;
-        this.s.cpuHuddleClock =
-          performance.now() + 800 + (decision.offensePlayId.length % 5) * 100;
+        this.s.cpuHuddleClock = performance.now() + 800 + (decision.offensePlayId.length % 5) * 100;
         // Stay in PICK so the CPU-offense overlay renders before the snap beat.
       } else if (performance.now() >= this.s.cpuHuddleClock) {
         this.confirmCpuPlay();

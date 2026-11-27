@@ -44,9 +44,7 @@ const snap = (page: Page): Promise<Snap> =>
     };
   });
 
-test('CPU opponent: away down advances PICK→PRE_SNAP→LIVE→whistle on its own', async ({
-  page,
-}) => {
+test('CPU opponent: away down advances PICK→PRE_SNAP→LIVE→whistle on its own', async ({ page }) => {
   const errors = trackErrors(page);
   await page.goto('/football/?quarter=180');
   await expect(page.locator('#game canvas')).toBeVisible();
@@ -62,17 +60,17 @@ test('CPU opponent: away down advances PICK→PRE_SNAP→LIVE→whistle on its o
     expect(Date.now(), 'home possession never flipped to the CPU in time').toBeLessThan(deadline);
 
     if (s.mode === 'PICK') {
-      // A = Inside Gore Run; on 4th down C = "Go For It (Run)" so the down ends
-      // as a turnover-on-downs (no kick meter needed) and possession flips.
-      await tap(page, s.down >= 4 ? P1.C : P1.A);
+      // Downs 1-3: Quick Slants (PASS) with NO throw → QB takes a sack for no
+      // gain, stalling the drive. 4th down: "Go For It (Run)" that fails to
+      // convert → turnover on downs → possession flips (no kick meter needed).
+      await tap(page, P1.C);
       await page.waitForTimeout(80);
     } else if (s.mode === 'PRE_SNAP') {
       await tap(page, P1.C); // snap
       await page.waitForTimeout(80);
     } else if (s.mode === 'LIVE') {
-      // No steer: let the home carrier get tackled for short/no gain so home
-      // stalls to 4th down quickly, then punts (A) — a deterministic possession
-      // flip. (A TD would also flip, but a quick three-and-out is faster.)
+      // Pass with windows never opened → the QB is sacked / throws it away, the
+      // down ends with no gain. Just wait for the whistle.
       await page.waitForTimeout(150);
     } else {
       await page.waitForTimeout(150); // BANNER
@@ -104,25 +102,17 @@ test('CPU opponent: away down advances PICK→PRE_SNAP→LIVE→whistle on its o
   const opening = await snap(page);
   const downBefore = opening.down;
   const losBefore = opening.los;
-  await expect
-    .poll(async () => (await snap(page)).mode, { timeout: 15_000 })
-    .toBe('PRE_SNAP');
+  await expect.poll(async () => (await snap(page)).mode, { timeout: 15_000 }).toBe('PRE_SNAP');
   // The human C (snap) must not be required: wait for LIVE without touching C.
   await expect.poll(async () => (await snap(page)).mode, { timeout: 15_000 }).toBe('LIVE');
   // Capture the CPU live down for the readability screenshot.
-  await expect
-    .poll(async () => (await snap(page)).carrierId, { timeout: 5_000 })
-    .not.toBeNull();
+  await expect.poll(async () => (await snap(page)).carrierId, { timeout: 5_000 }).not.toBeNull();
   await page.screenshot({ path: join(screenshotDir, 'ml-pq2-cpu-live.png') });
 
   // The down runs to the whistle and the session advances on its own.
-  await expect
-    .poll(async () => (await snap(page)).mode, { timeout: 20_000 })
-    .toBe('BANNER');
+  await expect.poll(async () => (await snap(page)).mode, { timeout: 20_000 }).toBe('BANNER');
   // After the banner, possession flips back to home and down/los have advanced.
-  await expect
-    .poll(async () => (await snap(page)).mode, { timeout: 15_000 })
-    .toBe('PICK');
+  await expect.poll(async () => (await snap(page)).mode, { timeout: 15_000 }).toBe('PICK');
   const afterWhistle = await snap(page);
   expect(afterWhistle.possession).not.toBe('away');
   // `down` advanced unless the CPU scored (then it resets to 1 via kickoff) —
