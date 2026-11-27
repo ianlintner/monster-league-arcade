@@ -20,6 +20,13 @@ import { updateLive, commitPass } from './matchSim';
 import { settleExpiredPeriod, updateBanner } from './matchOutcome';
 import { cpuOnOffense, cpuCallOffense } from './cpuOpponent';
 import { assignDefaultDefender } from './defenseInput';
+import {
+  menuOpen,
+  resetRouter,
+  tickNotice,
+  updateRouter,
+  type PreSnapRuntime,
+} from './preSnapRouter';
 
 export type PlayKind = 'RUN' | 'PASS' | 'PUNT' | 'FIELD_GOAL';
 
@@ -74,7 +81,7 @@ export function catalogForDown(
  * structurally; the controller owns no state, so this is a faithful port of the
  * former scene methods with `this.` replaced by `s` (the runtime surface).
  */
-export interface MatchRuntime {
+export interface MatchRuntime extends PreSnapRuntime {
   session: GameSession;
   live: LivePlay | null;
   liveResult: LivePlayResult | null;
@@ -165,6 +172,8 @@ export class MatchController {
   confirmPlay(index: number): void {
     this.s.selectedPlayIndex = index;
     this.s.cpuPlayId = null;
+    this.s.audiblePlayId = null;
+    resetRouter(this.s);
     this.s.session.selectPlays(catalogForDown(this.s.session.down)[index]!.id, DEFAULT_DEFENSE);
     this.s.mode = 'PRE_SNAP';
     // Build the live play at pick time so the PRE_SNAP formation renders its
@@ -221,13 +230,20 @@ export class MatchController {
     this.confirmPlay(this.s.selectedPlayIndex);
   }
 
-  private updatePreSnap(): void {
-    // CPU offense: snap after the readable beat; the human C must not snap for it.
+  private updatePreSnap(dt: number): void {
+    // The combo router runs on BOTH sides of the ball. On defense (CPU possession)
+    // the human can still call A / A→C→A/B/C nasties, and the menu timeout must
+    // tick while the CPU waits to snap. Calling it first also means a bare C is
+    // consumed here as a non-snap on defense — the CPU owns that snap.
+    const route = updateRouter(this.s, dt, () => this.prepareLivePlay());
     if (cpuOnOffense(this.s.session)) {
-      if (performance.now() >= this.s.cpuSnapClock) this.beginLivePlay();
+      // Hold the CPU's readable beat while a defensive menu is open, otherwise
+      // the A→C→A/B/C combo the HUD advertises is unreachable in the ~1 s window.
+      if (!menuOpen(this.s) && performance.now() >= this.s.cpuSnapClock) this.beginLivePlay();
       return;
     }
-    if (this.s.pressedBtn('C')) this.beginLivePlay();
+    // Human offense: a bare C from IDLE hikes; a C inside a menu never does.
+    if (route === 'HIKE') this.beginLivePlay();
   }
 
   /** Build the 14-actor `LivePlay` and reset per-down presentation state. Safe to
@@ -237,8 +253,9 @@ export class MatchController {
     // CPU offense: use the coach's chosen play id (bypassing the human A/B/C
     // catalog, which never contains punts/FGs/deep routes); otherwise the human
     // catalog index.
-    const play = this.s.cpuPlayId
-      ? { id: this.s.cpuPlayId, kind: getOffensePlay(this.s.cpuPlayId).kind }
+    const overrideId = this.s.cpuPlayId ?? this.s.audiblePlayId;
+    const play = overrideId
+      ? { id: overrideId, kind: getOffensePlay(overrideId).kind }
       : catalogForDown(this.s.session.down)[this.s.selectedPlayIndex]!;
     this.s.isPassPlay = play.kind === 'PASS';
     this.s.isKickPlay = play.kind === 'PUNT' || play.kind === 'FIELD_GOAL';
@@ -339,12 +356,14 @@ export class MatchController {
     // A quarter that expired between plays (huddle/pre-snap clock) has no banner to
     // carry it forward: advance the period before any mode handler touches the session.
     if (settleExpiredPeriod(this.s)) return;
+    tickNotice(this.s, dt);
+    if (this.s.mode !== 'PRE_SNAP') resetRouter(this.s);
     switch (this.s.mode) {
       case 'PICK':
         this.updatePick();
         break;
       case 'PRE_SNAP':
-        this.updatePreSnap();
+        this.updatePreSnap(dt);
         break;
       case 'LIVE':
         updateLive(this.s, dt);

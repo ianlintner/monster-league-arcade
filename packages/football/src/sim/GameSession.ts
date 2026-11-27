@@ -250,6 +250,14 @@ export class GameSession {
   get half(): 1 | 2 {
     return this.quarter <= 2 ? 1 : 2;
   }
+  /** Read-only: the offense play currently selected for this down (null in the huddle). */
+  get selectedOffensePlayId(): string | null {
+    return this.offensePlayId;
+  }
+  /** Read-only: the defense play currently selected for this down. */
+  get selectedDefensePlayId(): string | null {
+    return this.defensePlayId;
+  }
   get defense(): TeamId {
     return opponentOf(this.possession);
   }

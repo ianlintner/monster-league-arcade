@@ -76,6 +76,7 @@ test('prompt stays inside the 1280x720 viewport in PICK, PRE_SNAP and LIVE', asy
   await expect.poll(() => mode(page)).toBe('PRE_SNAP');
   await expectInViewport(page, 'onboard-prompt');
   await expect(prompt).toContainText('[C=L] Hike');
+  await expect(prompt).toContainText('[A=J] Audible');
 
   await tap(page, P1.C);
   await expect.poll(() => mode(page)).toBe('LIVE');
@@ -93,19 +94,24 @@ test('control-bar and prompt text list no input the scene does not handle', asyn
   await expect(page.getByTestId('controls-card')).toBeVisible();
   await page.keyboard.press('Space');
   await expect.poll(() => mode(page)).toBe('PICK');
-  const states: string[] = [];
-  const grab = async (): Promise<void> => {
-    states.push(await page.locator('.gsn-control-bar__prompt').innerText());
-    states.push(await page.getByTestId('onboard-prompt').innerText());
+  const states: { label: string; text: string }[] = [];
+  const grab = async (label: string): Promise<void> => {
+    states.push({ label, text: await page.locator('.gsn-control-bar__prompt').innerText() });
+    states.push({ label, text: await page.getByTestId('onboard-prompt').innerText() });
   };
-  await grab();
+  await grab('PICK');
   await tap(page, P1.A);
   await expect.poll(() => mode(page)).toBe('PRE_SNAP');
-  await grab();
+  await grab('PRE_SNAP');
   await tap(page, P1.C);
   await expect.poll(() => mode(page)).toBe('LIVE');
-  await grab();
-  for (const text of states) {
-    expect(text).not.toMatch(/audible|shift(?! defender)/i);
+  await grab('LIVE');
+  for (const { label, text } of states) {
+    expect(text).not.toMatch(/shift(?! defender)/i);
+    // Audible is real ONLY in PRE_SNAP (the D1 router). Keep the invariant that
+    // no prompt advertises an input the scene ignores: it must appear where it
+    // is handled and never in PICK/LIVE, where no key handles it.
+    if (label === 'PRE_SNAP') expect(text, `${label}: ${text}`).toMatch(/audible/i);
+    else expect(text, `${label}: ${text}`).not.toMatch(/audible/i);
   }
 });

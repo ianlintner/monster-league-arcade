@@ -9,6 +9,8 @@
  */
 import {
   buildHuddleOverlay,
+  buildNastyDrawer,
+  type NastyDrawerEntry,
   buildCpuHuddleOverlay,
   downDistanceLabel,
   factionName,
@@ -17,7 +19,8 @@ import {
 } from '../ui/hud';
 import type { FactionId } from '@monster-league/shared-core';
 import type { GameSession } from '../sim/index';
-import { getOffensePlay } from '../sim/index';
+import { getOffensePlay, nastyMenu } from '../sim/index';
+import { HUMAN_TEAM } from './preSnapRouter';
 
 /** Play kind, mirroring MatchScene's `PlayKind` (kept local to avoid importing the
  *  scene just for a type). */
@@ -38,6 +41,9 @@ export interface HudState {
   /** Live pass play / receiving windows open (optional: absent = false). */
   isPassPlay?: boolean;
   windowsOpen?: boolean;
+  /** Nasty callout line (empty = hidden) and its kind. */
+  nastyNotice?: string;
+  nastyNoticeKind?: 'call' | 'refuse' | null;
 }
 
 /** The `readyText` prompt caption plus the composed control-bar line. */
@@ -75,8 +81,8 @@ function composePrompt(s: HudState, down: string): string {
     }
     case 'PRE_SNAP':
       return onDefense
-        ? `Defense: CPU snaps shortly — get set · ${down}`
-        : `Pre-Snap: [C=L] Hike the ball · ${down}`;
+        ? `Defense: CPU snaps shortly — [A=J] Audible · [A→C → A/B/C] Nasty · ${down}`
+        : `Pre-Snap: [C=L] Hike · [A=J] Audible · [A→C → A/B/C] Nasty · ${down}`;
     case 'LIVE':
       if (s.isKickPlay) {
         return s.kickLocked === null
@@ -217,7 +223,7 @@ export function syncHuddle(doc: Document, s: HudState): void {
     kind: p.kind,
     formation: p.kind === 'PASS' ? 'SHOTGUN' : 'I-FORM',
   }));
-  const availableNasties = s.session.charges.remaining(s.session.possession, s.session.half);
+  const availableNasties = huddleDrawerEntries(s.session);
   const formations = [...new Set(plays.map((p) => p.formation))];
   const fingerprint = JSON.stringify({
     down: s.session.down,
@@ -229,5 +235,61 @@ export function syncHuddle(doc: Document, s: HudState): void {
   s.huddleFingerprint = fingerprint;
 
   host.replaceChildren(buildHuddleOverlay({ formations, plays, availableNasties }));
+  host.hidden = false;
+}
+
+/** Drawer rows for the human side: one per menu slot with its remaining half charge.
+ *  `playKind` null = play not chosen yet (huddle) → list both Pumpkin (pass) and Dynamite (run). */
+export function drawerEntries(session: GameSession, playKind: PlayKind | null): NastyDrawerEntry[] {
+  const team = HUMAN_TEAM;
+  const side = session.possession === team ? 'OFFENSE' : 'DEFENSE';
+  const rows: NastyDrawerEntry[] = [];
+  const menus =
+    side === 'OFFENSE' && playKind === null
+      ? [nastyMenu('OFFENSE', 'PASS'), nastyMenu('OFFENSE', 'RUN')]
+      : [nastyMenu(side, playKind)];
+  for (const menu of menus) {
+    menu.forEach((kind, i) => {
+      if (rows.some((r) => r.kind === kind)) return;
+      const note =
+        playKind === null && i === 0 ? (kind === 'PUMPKIN_BOMB_PASS' ? 'pass' : 'run') : undefined;
+      rows.push({
+        kind,
+        slot: (['A', 'B', 'C'] as const)[i]!,
+        charges: session.charges.available(team, kind, session.half) ? 1 : 0,
+        ...(note ? { note } : {}),
+      });
+    });
+  }
+  return rows;
+}
+
+function huddleDrawerEntries(session: GameSession): NastyDrawerEntry[] {
+  return drawerEntries(session, null);
+}
+
+/** In-canvas NASTY callout + pre-snap dirty-tricks drawer (hidden outside PRE_SNAP). */
+export function syncNastyOverlay(doc: Document, s: HudState): void {
+  const callout = doc.getElementById('nasty-callout');
+  if (callout) {
+    const text = s.nastyNotice ?? '';
+    callout.hidden = text === '';
+    callout.textContent = text;
+    callout.setAttribute('data-kind', s.nastyNoticeKind ?? '');
+  }
+  const host = doc.getElementById('nasty-presnap-drawer');
+  if (!host) return;
+  if (s.mode !== 'PRE_SNAP') {
+    host.replaceChildren();
+    host.hidden = true;
+    return;
+  }
+  const id = s.session.possession === HUMAN_TEAM ? s.session.selectedOffensePlayId : null;
+  const kind = id ? getOffensePlay(id).kind : null;
+  const entries = drawerEntries(s.session, kind);
+  const fp = JSON.stringify(entries);
+  if (host.getAttribute('data-fp') === fp && !host.hidden) return;
+  host.setAttribute('data-fp', fp);
+  host.replaceChildren(buildNastyDrawer(entries, 'nasty-presnap-drawer-list'));
   host.hidden = false;
 }

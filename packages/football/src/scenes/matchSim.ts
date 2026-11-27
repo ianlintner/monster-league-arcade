@@ -68,7 +68,13 @@ export function updateLive(s: MatchRuntime, dt: number): void {
   // computed per step and must color the very same command that step consumes.
   const cpuOff = cpuOnOffense(s.session);
   const turboHeld = cpuOff ? false : s.buttonHeld('C');
-  const pressedBThisTick = (cpuOff ? false : s.pressedBtn('B')) && s.isPassPlay === false;
+  // B fires the carried weapon (grenades / Ghoul Gas). On a pass play B is the throw key
+  // only while receiver windows are open, so it is deliberately available in the
+  // QB's pre-window dropback and after the window shuts — the weapon is not gated
+  // for the whole pass play.
+  // One press edge is consumed by the first fixed step so a frame running several steps
+  // cannot throw every grenade at once.
+  let pressedBThisTick = (cpuOff ? false : s.pressedBtn('B')) && !(s.isPassPlay && s.windowsOpen);
 
   // Advance a fixed-timestep 60 Hz simulation: accumulate the elapsed render
   // time and consume exactly the fixed steps due, so the field runs at real time
@@ -94,6 +100,7 @@ export function updateLive(s: MatchRuntime, dt: number): void {
       carrierTeam: carrier0?.team ?? s.session.possession,
       carrierSlot: carrier0?.slot ?? 'RB1',
     });
+    pressedBThisTick = false;
 
     // Hex of Confusion inverts the carrier's steering while its timer is live.
     let sx = cpuOff ? 0 : s.playerInput.x;

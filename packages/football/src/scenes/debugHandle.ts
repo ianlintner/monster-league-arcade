@@ -78,7 +78,10 @@ export function installDebugHandle(s: DebugHandleSurface): void {
     });
   };
   (window as unknown as Record<string, unknown>).__mlf = {
-    session: session(),
+    // Read-only live view (assertions only): effects, charges, ref state.
+    get session() {
+      return session();
+    },
     get phase() {
       return session()?.phase ?? '';
     },

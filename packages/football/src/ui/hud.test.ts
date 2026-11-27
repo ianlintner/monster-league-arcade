@@ -213,6 +213,7 @@ describe('Controls bar', () => {
     expect(buildControlsBar('PRE_SNAP').textContent).toContain('Hike');
     expect(buildControlsBar('CARRIER').textContent).toContain('Turbo');
     expect(buildControlsBar('DEFENSE').textContent).toContain('Switch');
-    expect(buildControlsBar('HUDDLE').textContent).toContain('Nasty');
+    expect(buildControlsBar('HUDDLE').textContent).not.toContain('Nasty');
+    expect(buildControlsBar('PRE_SNAP').textContent).toContain('[A=J] Audible');
   });
 });
