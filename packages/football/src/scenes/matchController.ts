@@ -17,7 +17,7 @@ import { NastyFieldEffects } from '../field/NastyFieldEffects';
 import type { BannerKind } from '../ui/hud';
 import type { ActorAnimation, ActorPresentationState } from './spriteRenderer';
 import { updateLive, commitPass } from './matchSim';
-import { updateBanner } from './matchOutcome';
+import { settleExpiredPeriod, updateBanner } from './matchOutcome';
 import { cpuOnOffense, cpuCallOffense } from './cpuOpponent';
 import { assignDefaultDefender } from './defenseInput';
 
@@ -336,6 +336,9 @@ export class MatchController {
 
   /** Route the update loop's mode switch into the correct state-machine handler. */
   updateMode(dt: number): void {
+    // A quarter that expired between plays (huddle/pre-snap clock) has no banner to
+    // carry it forward: advance the period before any mode handler touches the session.
+    if (settleExpiredPeriod(this.s)) return;
     switch (this.s.mode) {
       case 'PICK':
         this.updatePick();
