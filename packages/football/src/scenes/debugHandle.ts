@@ -87,6 +87,9 @@ export function installDebugHandle(s: DebugHandleSurface): void {
     get score() {
       return session()?.score ?? null;
     },
+    get quarter() {
+      return session()?.quarter ?? null;
+    },
     get los() {
       return session()?.los ?? null;
     },

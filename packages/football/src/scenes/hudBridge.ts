@@ -63,7 +63,10 @@ export function composeReadyLine(s: HudState): ReadyLine {
         : `Live: WASD run · [A=J] Dive · [C=L] Turbo · [B=K] Switch defender`;
       break;
     case 'BANNER':
-      prompt = s.bannerText;
+      prompt =
+        s.session.phase === 'GAME_OVER'
+          ? 'FINAL · Press [START=P] or [C=L] to play again'
+          : s.bannerText;
       break;
   }
   return { readyText: `${down}  ${clock}\n${prompt}`, controlLine: `${down}  ${clock}\n${prompt}` };
