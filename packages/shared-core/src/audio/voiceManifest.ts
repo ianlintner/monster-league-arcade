@@ -1,5 +1,7 @@
+import { assetUrl } from '../assets';
+
 /** Crypt Announcer voice clip manifest: ids, spoken lines and public URLs. */
-export const ANNOUNCER_BASE_URL = '/assets/audio/announcer/';
+export const ANNOUNCER_BASE_URL = assetUrl('assets/audio/announcer/');
 
 export const VOICE_CLIPS = [
   { id: 'welcome', text: 'WELCOME TO MONSTER LEAGUE FOOTBALL!' },

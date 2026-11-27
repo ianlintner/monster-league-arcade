@@ -12,6 +12,8 @@ const BASE_URL = `http://127.0.0.1:${PORT}`;
  */
 export default defineConfig({
   testDir: './e2e',
+  // Sub-path smoke has its own config (playwright.subpath.config.ts): different build base.
+  testIgnore: ['subpath-smoke.spec.ts'],
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,

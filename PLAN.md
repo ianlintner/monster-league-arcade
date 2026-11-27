@@ -155,8 +155,8 @@ We implement a clean-room mechanical homage based on documented 1993 Genesis mec
     - `/` — Retro-modern **Monster League Arcade Cabinet Hub** (select Football or Hockey, inspect the 4 Monster Factions & star rosters, test audio/CRT settings, view controls).
     - `/football/` — *Halloween Monster League Football*.
     - `/hockey/` — *Monster League Hockey* preview mode.
-- **Azure Static Web Apps (`staticwebapp.config.json`)**:
-  - Single Azure Static Web App resource (`monster-league-arcade`, Free SKU) serving the unified `dist/` artifact with clean sub-path routing (`/football/*`, `/hockey/*`), immutable asset caching, and security headers.
+- **Hosting (Cat Herding Games hub)**:
+  - Served at `https://games.cat-herding.net/monster-league-arcade/` from the hub's shared Azure Static Web App; the hub builds this repo with `--base=/monster-league-arcade/` (this repo no longer deploys its own SWA).
 
 ---
 
@@ -180,4 +180,4 @@ We implement a clean-room mechanical homage based on documented 1993 Genesis mec
 | 4 | Halloween Pixel Art & Visual Asset Pipeline: 4 Monster Factions, 3 Arenas, Hazards & Portraits (fal.ai + palette normalizer) | Card 1 | `coder-claude` | `smart-v2` | Spritesheets, tilesets, crests & portraits generated within ≤$5 image cap, normalized to `#0B0711` outline + master palette, validated by `npm run validate-assets` | `local-only` |
 | 5 | Audio Engine & Crypt Announcer: Web Audio YM2612 FM Synth + fal.ai Voice Pack | Card 1 | `coder-claude` | `smart-v2` | FM synth BGM/SFX + announcer voice clips generated within ≤$5 audio cap, zero console errors, mute/volume persistence tested | `local-only` |
 | 6 | Broadcast HUD/UI & AI Coach: Genesis Playbook Huddle, Scorebug, Animated Penalty/Casualty Banners & Monster Bowl | Cards 2, 3 | `coder-claude` | `smart-v2` | Full 4-quarter exhibition + 4-team Monster Bowl tournament playable vs AI or 2P, unified `GSN 66.6` HUD overlays & penalty banners verified in Playwright across scenes | `local-only` |
-| 7 | MVP Integration, Visual Coherence QA, Azure Static Web Apps Deployment & Architecture Lock | Cards 3, 4, 5, 6 | `coder-claude` | `smart-frontier-v2` (`switchyard-anthropic`) | All assets/audio wired into `/football/`, `/hockey/` & `/` hub, `ARCHITECTURE.md` written, `scripts/deploy.sh` deploys live Azure SWA preview, visual & E2E smoke passes | `local-only` |
+| 7 | MVP Integration, Visual Coherence QA, Azure Static Web Apps Deployment & Architecture Lock | Cards 3, 4, 5, 6 | `coder-claude` | `smart-frontier-v2` (`switchyard-anthropic`) | All assets/audio wired into `/football/`, `/hockey/` & `/` hub, `ARCHITECTURE.md` written, original `scripts/deploy.sh` preview deploy (since retired — hosting now on the Cat Herding Games hub), visual & E2E smoke passes | `local-only` |

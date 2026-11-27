@@ -1,10 +1,16 @@
 import { initChrome } from './chrome';
-import { FACTIONS, getArena, InputManager, type Faction } from '@monster-league/shared-core';
+import {
+  FACTIONS,
+  assetUrl,
+  getArena,
+  InputManager,
+  type Faction,
+} from '@monster-league/shared-core';
 import { el } from '@monster-league/shared-core/ui';
 import { AudioManager } from '@monster-league/shared-core/audio';
 
 // Shared normalized-art registry: all routes point at the same /assets tree.
-const ASSET_ROOT = '/assets';
+const ASSET_ROOT = assetUrl('assets');
 const ASSET_SLUGS: Record<string, string> = {
   reapers: 'boneyard_reapers',
   deadskins: 'rotting_deadskins',

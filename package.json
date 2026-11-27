@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Monster League Arcade — retro-modern Halloween sports arcade (Phaser 4 + TypeScript + Vite) on Azure Static Web Apps.",
+  "description": "Monster League Arcade — retro-modern Halloween sports arcade (Phaser 4 + TypeScript + Vite) on the Cat Herding Games hub.",
   "license": "MIT",
   "engines": {
     "node": ">=22.12.0"
@@ -29,12 +29,10 @@
     "validate-audio": "node scripts/validate-audio.mjs",
     "generate:announcer": "node scripts/generate-announcer.mjs",
     "e2e": "playwright test",
-    "e2e:live": "playwright test --config playwright.live.config.ts",
     "verify:deployment": "node scripts/verify-deployment.mjs",
     "e2e:report": "playwright show-report"
   },
   "devDependencies": {
-    "@azure/static-web-apps-cli": "2.1.0",
     "@eslint/js": "9.39.5",
     "@playwright/test": "1.64.1",
     "@types/node": "26.6.6",

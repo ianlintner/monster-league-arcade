@@ -11,7 +11,12 @@
  */
 import * as Phaser from 'phaser';
 import { HALLOWEEN_MIDNIGHT_PALETTE as P } from '@monster-league/shared-core';
-import { InputManager, type InputSnapshot, type ArcadeButton } from '@monster-league/shared-core';
+import {
+  InputManager,
+  assetUrl,
+  type InputSnapshot,
+  type ArcadeButton,
+} from '@monster-league/shared-core';
 import { GameSession } from '../sim/index';
 import { drawFieldSprites, drawField, drawHazards, hazardStateKey } from './fieldRenderer';
 import type { DrawSurface } from './fieldRenderer';
@@ -225,7 +230,7 @@ export class MatchScene extends Phaser.Scene {
   // ------------------------------------------------------------- lifecycle
 
   preload(): void {
-    this.load.json('atlas', '/assets/atlas.json');
+    this.load.json('atlas', assetUrl('assets/atlas.json'));
     // Faction sprite sheets (home + away) and both referee sheets are loaded as
     // *sprite sheets* so Phaser registers a 48×48 texture frame per cell. Drawing
     // a cell as a real frame (not `setCrop` on the whole 288×672 sheet) keeps the
@@ -239,16 +244,24 @@ export class MatchScene extends Phaser.Scene {
       'transylvania_nightstalkers',
       'salem_bayou_ghouls',
     ]) {
-      this.load.spritesheet(sheet, `/assets/sprites/${sheet}.png`, frame);
-      this.load.spritesheet(`${sheet}-away`, `/assets/sprites/${sheet}-away.png`, frame);
-      this.load.image(`crest_${sheet}`, `/assets/sprites/crest_${sheet}.png`);
+      this.load.spritesheet(sheet, assetUrl(`assets/sprites/${sheet}.png`), frame);
+      this.load.spritesheet(`${sheet}-away`, assetUrl(`assets/sprites/${sheet}-away.png`), frame);
+      this.load.image(`crest_${sheet}`, assetUrl(`assets/sprites/crest_${sheet}.png`));
     }
-    this.load.spritesheet(REF_SHEET_NECRO, `/assets/sprites/${REF_SHEET_NECRO}.png`, frame);
-    this.load.spritesheet(REF_SHEET_DEMON, `/assets/sprites/${REF_SHEET_DEMON}.png`, frame);
+    this.load.spritesheet(
+      REF_SHEET_NECRO,
+      assetUrl(`assets/sprites/${REF_SHEET_NECRO}.png`),
+      frame,
+    );
+    this.load.spritesheet(
+      REF_SHEET_DEMON,
+      assetUrl(`assets/sprites/${REF_SHEET_DEMON}.png`),
+      frame,
+    );
     // Arena tiles (home faction's arena): turf + end zone, tiled across the field.
     for (const arena of ['cursed_graveyard', 'brimstone_hellfire_pit', 'ectoplasm_swamp']) {
-      this.load.image(`${arena}_turf`, `/assets/arenas/${arena}_turf.png`);
-      this.load.image(`${arena}_endzone`, `/assets/arenas/${arena}_endzone.png`);
+      this.load.image(`${arena}_turf`, assetUrl(`assets/arenas/${arena}_turf.png`));
+      this.load.image(`${arena}_endzone`, assetUrl(`assets/arenas/${arena}_endzone.png`));
     }
   }
 

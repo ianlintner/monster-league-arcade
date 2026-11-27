@@ -55,11 +55,15 @@ Do not fork the football sim or duplicate the GSN chrome.
 
 ## Hosting & delivery
 
-Single Azure Static Web App (`monster-league-arcade`, Free SKU, `nekoc`) serves
-the one `dist/` artifact for all routes. `staticwebapp.config.json` supplies
-clean `/football/` and `/hockey/` routing, immutable asset caching and security
-headers. `scripts/deploy.sh [review|production]` runs `npm run check`, refuses a
-dirty tree, fetches the deployment token into process memory only, deploys via
-the SWA CLI with keychain persistence disabled, and verifies every route,
-header and asset sha256 against `dist/` using `scripts/verify-deployment.mjs`.
-Production deploys additionally require an `origin/main`-aligned HEAD.
+The game is hosted by the Cat Herding Games hub
+(<https://games.cat-herding.net/monster-league-arcade/>), which builds `main`
+with `--base=/monster-league-arcade/` into a shared Azure Static Web App. This
+repo has no deploy workflow; the hub owns routing, caching and security headers.
+
+Sub-path safety contract: every URL resolves from `import.meta.env.BASE_URL`
+(`assetUrl()` in shared-core for TypeScript; relative `href`s in HTML), never
+root-absolute. CI enforces it with `playwright.subpath.config.ts`, which builds
+with the hub's base and serves under that prefix (404 elsewhere).
+`.github/workflows/verify-production.yml` checks the live site daily with
+`scripts/verify-deployment.mjs` (routes, headers, asset sha256 vs. a build with
+the same base).

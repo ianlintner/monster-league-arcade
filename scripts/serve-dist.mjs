@@ -13,11 +13,20 @@ const types = {
   '.json': 'application/json',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
+  '.mp3': 'audio/mpeg',
 };
+// Optional mount prefix (e.g. /monster-league-arcade) so a build made with
+// `--base=/monster-league-arcade/` is served exactly as the hub serves it. Anything outside
+// the prefix is a 404, which makes root-absolute URLs fail loudly.
+const prefix = (process.env.E2E_BASE_PATH ?? '').replace(/\/+$/, '');
 
 createServer(async (req, res) => {
   try {
-    const path = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname);
+    let path = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname);
+    if (prefix) {
+      if (path !== prefix && !path.startsWith(`${prefix}/`)) throw new Error('outside base');
+      path = path.slice(prefix.length) || '/';
+    }
     let file = resolveInside(dist, path);
     if (!file) throw new Error('forbidden');
     const s = await stat(file).catch(() => null);
