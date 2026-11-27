@@ -391,7 +391,7 @@ function legendFor(context: ControlContext): string {
     case 'HUDDLE':
       return 'Huddle: [A=J]/[B=K]/[C=L] Call Play · [C=L] Nasty Drawer';
     case 'PRE_SNAP':
-      return 'Pre-Snap: [A=J] Audible · [B=K] Shift · [C=L] Hike';
+      return 'Pre-Snap: [C=L] Hike';
     case 'PASSING':
       return 'Passing: [A=J]/[B=K]/[C=L] Throw · WASD lead receiver';
     case 'CARRIER':

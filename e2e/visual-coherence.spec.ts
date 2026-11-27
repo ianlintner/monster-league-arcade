@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { expect, test } from './fixtures';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { screenshotDir } from './screenshot-path';

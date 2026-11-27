@@ -35,12 +35,17 @@ export interface HudState {
   cpuPlayId: string | null;
   /** Fingerprint of the last huddle overlay build; mutated in place on rebuild. */
   huddleFingerprint: string;
+  /** Live pass play / receiving windows open (optional: absent = false). */
+  isPassPlay?: boolean;
+  windowsOpen?: boolean;
 }
 
 /** The `readyText` prompt caption plus the composed control-bar line. */
 export interface ReadyLine {
   readyText: string;
   controlLine: string;
+  /** Just the instruction, for the in-viewport prompt overlay. */
+  promptLine: string;
 }
 
 /** Compose the on-canvas/football-promoted status line for the current frame. */
@@ -50,36 +55,46 @@ export function composeReadyLine(s: HudState): ReadyLine {
   ).padStart(2, '0')}`;
   const down = `DOWN ${s.session.down} · ${s.session.yardsToGo} TO GO`;
 
-  let prompt = '';
+  const prompt = composePrompt(s, down);
+  const line = `${down}  ${clock}\n${prompt}`;
+  return { readyText: line, controlLine: line, promptLine: prompt };
+}
+
+/** The per-mode instruction line. Only lists inputs the scene actually handles. */
+function composePrompt(s: HudState, down: string): string {
+  const onDefense = s.session.possession === 'away';
   switch (s.mode) {
     case 'PICK': {
       if (s.cpuPlayId) {
         // CPU offense: no human pick list — name the AI's called play.
-        prompt = `CPU OFFENSE — ${getOffensePlay(s.cpuPlayId).name}`;
-        break;
+        return `CPU OFFENSE — ${getOffensePlay(s.cpuPlayId).name}`;
       }
+      if (onDefense) return 'CPU has the ball — it is calling its play';
       const cat = catalogForDown(s.session.down);
-      prompt = `Call the play — [A=J] ${cat[0]!.label} · [B=K] ${cat[1]!.label} · [C=L] ${cat[2]!.label}`;
-      break;
+      return `Call the play — [A=J] ${cat[0]!.label} · [B=K] ${cat[1]!.label} · [C=L] ${cat[2]!.label}`;
     }
     case 'PRE_SNAP':
-      prompt = `Pre-Snap: [C=L] Snaps the ball · ${down}`;
-      break;
+      return onDefense
+        ? `Defense: CPU snaps shortly — get set · ${down}`
+        : `Pre-Snap: [C=L] Hike the ball · ${down}`;
     case 'LIVE':
-      prompt = s.isKickPlay
-        ? s.kickLocked === null
+      if (s.isKickPlay) {
+        return s.kickLocked === null
           ? `Hold [C=L] to sweep the kick meter, release to lock · ${down}`
-          : `Kick locked · ${down}`
-        : `Live: WASD run · [A=J] Dive · [C=L] Turbo · [B=K] Switch defender`;
-      break;
+          : `Kick locked · ${down}`;
+      }
+      if (onDefense) return 'Defense: WASD steer defender · [B=K] switch · [A=J] dive tackle';
+      if (s.isPassPlay) {
+        return s.windowsOpen
+          ? 'Passing: [A=J] [B=K] [C=L] throw to receiver (hold = bullet)'
+          : 'Passing: [C=L] open receiver windows · WASD move';
+      }
+      return 'Live: WASD run · [A=J] Dive · [C=L] Turbo';
     case 'BANNER':
-      prompt =
-        s.session.phase === 'GAME_OVER'
-          ? 'FINAL · Press [START=P] or [C=L] to play again'
-          : s.bannerText;
-      break;
+      return s.session.phase === 'GAME_OVER'
+        ? 'FINAL · Press [START=P] or [C=L] to play again'
+        : s.bannerText;
   }
-  return { readyText: `${down}  ${clock}\n${prompt}`, controlLine: `${down}  ${clock}\n${prompt}` };
 }
 
 /** The play list in play for the current down (4th down → special teams). */

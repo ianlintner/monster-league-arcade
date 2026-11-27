@@ -47,6 +47,7 @@ import { installDebugHandle, type DebugHandleSurface } from './debugHandle';
 import { MatchController } from './matchController';
 import { cpuOnOffense } from './cpuOpponent';
 import { quarterSecondsFromSearch } from './matchConfig';
+import { mountOnboarding, type Onboarding } from '../ui/onboarding';
 
 export const CANVAS_WIDTH = 640;
 export const CANVAS_HEIGHT = 360;
@@ -83,6 +84,8 @@ export class MatchScene extends Phaser.Scene {
   private groundGfx!: Phaser.GameObjects.Graphics;
   private actorsLayer!: Phaser.GameObjects.Container;
   private readyText!: Phaser.GameObjects.Text;
+  /** In-viewport prompt strip + first-run controls card (DOM). */
+  private onboarding: Onboarding | null = null;
 
   /** Home/away sheet id resolved once at create from the session rosters. */
   private homeSheet = '';
@@ -333,6 +336,8 @@ export class MatchScene extends Phaser.Scene {
     // overlay is hidden entirely.
     if (MatchScene.isProduction) this.readyText.setVisible(false);
 
+    // Mount once (the scene may be restarted): the prompt strip + first-run card.
+    this.onboarding ??= mountOnboarding();
     this.refreshUi();
   }
 
@@ -393,6 +398,11 @@ export class MatchScene extends Phaser.Scene {
   }
 
   override update(_time: number, delta: number): void {
+    // The first-run controls card pauses the match (play clock included) until dismissed.
+    if (this.onboarding?.isOpen()) {
+      this.refreshUi();
+      return;
+    }
     const dt = Math.min(delta, 50) / 1000;
     this.renderDt = dt;
     this.sampleInput(dt);
@@ -589,10 +599,13 @@ export class MatchScene extends Phaser.Scene {
       kickLocked: this.kickLocked,
       cpuPlayId: this.cpuPlayId,
       huddleFingerprint: this.huddleFingerprint,
+      isPassPlay: this.isPassPlay,
+      windowsOpen: this.windowsOpen,
     };
-    const { readyText, controlLine } = composeReadyLine(hudState);
+    const { readyText, controlLine, promptLine } = composeReadyLine(hudState);
     this.huddleFingerprint = hudState.huddleFingerprint;
     this.readyText.setText(readyText);
+    this.onboarding?.setPrompt(promptLine);
     this.updateDom(controlLine);
   }
 
