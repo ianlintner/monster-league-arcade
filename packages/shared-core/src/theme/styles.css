@@ -1008,3 +1008,252 @@ body.gsn-crt-on .gsn-crt-overlay {
   opacity: 0.5;
   text-decoration: line-through;
 }
+
+/* ── Phone layout + on-screen arcade pad (ML-NEXT scope 6) ────────────────── */
+
+/* Hidden on desktop. Coarse pointers get it immediately; a hybrid gets it after
+   its first real touch (mountTouchControls adds `gsn-touch-ready`). */
+.gsn-touch-controls {
+  display: none;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 950;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px max(8px, env(safe-area-inset-left)) calc(8px + env(safe-area-inset-bottom));
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none;
+  background: linear-gradient(to top, rgba(11, 7, 17, 0.94), rgba(11, 7, 17, 0));
+}
+.gsn-touch-controls > * {
+  pointer-events: auto;
+}
+@media (pointer: coarse) {
+  .gsn-touch-controls {
+    display: flex;
+  }
+  .gsn-chrome {
+    padding-bottom: 200px;
+  }
+  .gsn-onboard-prompt,
+  .gsn-nasty-presnap {
+    bottom: 180px;
+  }
+}
+body.gsn-touch-ready .gsn-touch-controls {
+  display: flex;
+}
+body.gsn-touch-ready .gsn-chrome {
+  padding-bottom: 200px;
+}
+body.gsn-touch-ready .gsn-onboard-prompt,
+body.gsn-touch-ready .gsn-nasty-presnap {
+  bottom: 180px;
+}
+
+.gsn-touch-controls__dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 48px);
+  grid-template-rows: repeat(3, 48px);
+  gap: 4px;
+}
+.gsn-touch-btn--up {
+  grid-area: 1 / 2;
+}
+.gsn-touch-btn--left {
+  grid-area: 2 / 1;
+}
+.gsn-touch-btn--right {
+  grid-area: 2 / 3;
+}
+.gsn-touch-btn--down {
+  grid-area: 3 / 2;
+}
+
+.gsn-touch-controls__face {
+  display: grid;
+  grid-template-columns: repeat(3, 54px);
+  gap: 6px;
+}
+.gsn-touch-controls__face .gsn-touch-btn--START {
+  grid-column: 1 / -1;
+}
+
+.gsn-touch-btn {
+  appearance: none;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 2px solid var(--gsn-void-black);
+  border-radius: 6px;
+  background: var(--gsn-iron-bezel);
+  box-shadow: inset 0 0 0 1px rgba(214, 199, 178, 0.35);
+  color: var(--gsn-bone-white);
+  font-family: var(--gsn-font-pixel);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.gsn-touch-btn--A {
+  background: var(--gsn-pumpkin-orange);
+  color: var(--gsn-void-black);
+}
+.gsn-touch-btn--C {
+  background: var(--gsn-ecto-green);
+  color: var(--gsn-void-black);
+}
+.gsn-touch-btn.is-pressed,
+.gsn-touch-btn:active {
+  background: var(--gsn-spectral-cyan);
+  color: var(--gsn-void-black);
+  transform: translateY(2px);
+}
+
+@media (max-width: 640px) {
+  .gsn-chrome {
+    padding: 12px 10px 200px;
+  }
+  .gsn-header {
+    gap: 6px;
+    padding-bottom: 8px;
+  }
+  .gsn-brand {
+    font-size: 20px;
+  }
+  .gsn-brand__sub {
+    font-size: 10px;
+  }
+  .gsn-tagline {
+    margin: 8px 0 14px;
+    font-size: 13px;
+  }
+  .gsn-toolbar {
+    margin-bottom: 12px;
+  }
+  .gsn-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .gsn-btn {
+    padding: 8px 10px;
+    font-size: 11px;
+  }
+  .gsn-stage {
+    margin-bottom: 10px;
+  }
+  .gsn-canvas-bezel {
+    padding: 6px;
+  }
+
+  /* Stack the scorebug into three rows: each team name stays beside its score
+     instead of wrapping the old flat flex row into unreadable fragments. */
+  .gsn-scorebug {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'home home-score'
+      'center center'
+      'away-score away';
+    gap: 4px 8px;
+    font-size: 14px;
+  }
+  .gsn-scorebug > .gsn-scorebug__team:nth-child(1) {
+    grid-area: home;
+  }
+  .gsn-scorebug > .gsn-scorebug__score:nth-child(2) {
+    grid-area: home-score;
+  }
+  .gsn-scorebug > .gsn-scorebug__center {
+    grid-area: center;
+  }
+  .gsn-scorebug > .gsn-scorebug__score:nth-child(4) {
+    grid-area: away-score;
+    justify-self: end;
+  }
+  .gsn-scorebug > .gsn-scorebug__team:nth-child(5) {
+    grid-area: away;
+    justify-content: flex-end;
+  }
+  .gsn-scorebug__team {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .gsn-scorebug__name {
+    font-size: 10px;
+    letter-spacing: 0;
+  }
+  .gsn-scorebug__score,
+  .gsn-scorebug__clock {
+    font-size: 16px;
+  }
+  .gsn-skull {
+    width: 9px;
+    height: 9px;
+  }
+  .gsn-skulls__warning {
+    margin-left: 4px;
+    font-size: 8px;
+  }
+  .gsn-scorebug__bribe {
+    font-size: 9px;
+    text-align: center;
+    overflow-wrap: anywhere;
+  }
+
+  .gsn-huddle {
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px;
+  }
+  .gsn-huddle__drawer {
+    min-width: 0;
+  }
+  .gsn-huddle__drawer-list {
+    overflow-wrap: anywhere;
+  }
+  .gsn-huddle__card {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 3px 6px;
+  }
+  .gsn-huddle__card-name {
+    overflow-wrap: anywhere;
+  }
+  .gsn-control-bar__prompt {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    font-size: 10px;
+  }
+  .gsn-onboard-prompt {
+    max-width: calc(100vw - 16px);
+    font-size: 10px;
+  }
+  .gsn-controls-card {
+    padding: 12px;
+    font-size: 13px;
+  }
+  .gsn-controls-card__keys b {
+    min-width: 60px;
+  }
+  .gsn-nasty-callout {
+    max-width: calc(100vw - 16px);
+    font-size: 14px;
+    text-align: center;
+    white-space: normal;
+  }
+  .gsn-nasty-presnap {
+    max-width: calc(100vw - 16px);
+    font-size: 10px;
+  }
+}
