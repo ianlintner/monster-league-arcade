@@ -30,6 +30,7 @@ export interface DebugHandleSurface {
   carrierScreen: () => { px: number; py: number; scale: number } | null;
   camZoom: () => number;
   bannerKind: () => string;
+  audio: () => { muted: boolean; unlocked: boolean };
   confirmPlay: (index: number) => void;
   beginLivePlay: () => void;
   openPassWindows: () => void;
@@ -139,6 +140,8 @@ export function installDebugHandle(s: DebugHandleSurface): void {
     get bannerKind() {
       return bannerKind();
     },
+    // Read-only: audio state for the mute/unlock assertions.
+    audio: () => s.audio(),
     get aiDecision() {
       return aiDecision();
     },

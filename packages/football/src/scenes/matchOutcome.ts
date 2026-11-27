@@ -117,6 +117,7 @@ export function commitOutcome(s: MatchRuntime): void {
   if (s.pendingHazardHits.length > 0) snap.hazards = [...s.pendingHazardHits];
   const res = s.session.snap(snap as Parameters<GameSession['snap']>[0]);
   showBanner(s, res.banner);
+  s.audio?.playResult(res, Boolean(r.tackler));
   collectDamageAndCasualties(s);
 
   // Presentation for the play-over roll: the tackled carrier drops into a

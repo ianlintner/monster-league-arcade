@@ -50,6 +50,7 @@ import { MatchController } from './matchController';
 import { cpuOnOffense } from './cpuOpponent';
 import { quarterSecondsFromSearch } from './matchConfig';
 import { mountOnboarding, type Onboarding } from '../ui/onboarding';
+import { MatchAudio, type AudioSink } from './matchAudio';
 
 export const CANVAS_WIDTH = 640;
 export const CANVAS_HEIGHT = 360;
@@ -58,6 +59,11 @@ export class MatchScene extends Phaser.Scene {
   /** Set by `bootFootball(_, { production: true })` from the app entry; gates the
    *  on-canvas instruction/debug text overlay (game state lives in the HUD). */
   static isProduction = false;
+  /** Audio sink handed in by `bootFootball` (null = silent, e.g. tests). */
+  static audioSink: AudioSink | null = null;
+
+  /** Cue player over the sink; also the read-only `__mlf.audio()` source. */
+  audio: MatchAudio = new MatchAudio(MatchScene.audioSink);
 
   /** The live-play mode state machine + sim loop, extracted to `matchController`.
    *  It owns no state: it reads/writes this scene through the `MatchRuntime`
@@ -454,6 +460,7 @@ export class MatchScene extends Phaser.Scene {
     }
 
     this.match.updateMode(dt);
+    this.audio.tick(this.mode);
     const actors = this.actorPresenter.renderActors(this.renderContext());
     this.spriteBackedActorCount = actors.spriteBackedActorCount;
     this.carrierScreen = actors.carrierScreen;
@@ -676,6 +683,7 @@ export class MatchScene extends Phaser.Scene {
       carrierScreen: () => this.carrierScreen,
       camZoom: () => this.camera.zoom,
       bannerKind: () => this.bannerKind,
+      audio: () => this.audio.state(),
       confirmPlay: (index) => this.match.confirmPlay(index),
       beginLivePlay: () => this.match.beginLivePlay(),
       openPassWindows: () => {

@@ -348,6 +348,7 @@ export class MatchController {
     // in LIVE with a populated `this.s.live` (otherwise `updateLive` early-returns
     // forever and the whistle never fires).
     this.s.mode = 'LIVE';
+    this.s.audio?.snap();
     // CPU has the ball: P1 defends — start on the defender nearest the ball.
     if (this.s.live && cpuOnOffense(this.s.session)) assignDefaultDefender(this.s, this.s.live);
   }
