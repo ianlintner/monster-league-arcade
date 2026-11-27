@@ -23,6 +23,7 @@ export interface DebugHandleSurface {
   windowsOpen: () => boolean;
   ballInFlight: () => boolean;
   selectedPlayIndex: () => number;
+  cpuPlayId: () => string | null;
   lastResult: () => GameSession['lastResult'] | null;
   hazardManager: () => HazardManager | null;
   spriteBackedActorCount: () => number;
@@ -95,6 +96,12 @@ export function installDebugHandle(s: DebugHandleSurface): void {
     },
     get down() {
       return session()?.down ?? null;
+    },
+    get possession() {
+      return session()?.possession ?? null;
+    },
+    get cpuPlayId() {
+      return s.cpuPlayId();
     },
     get carrierId() {
       return live()?.carrier.id ?? null;

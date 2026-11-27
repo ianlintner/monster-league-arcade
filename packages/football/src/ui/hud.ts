@@ -226,6 +226,35 @@ export function buildHuddleOverlay(opts: {
   return overlay;
 }
 
+/**
+ * The CPU-offense huddle overlay: instead of the A/B/C pick list, show a single
+ * non-interactive card naming the play the AI coach just called. P1 cannot pick
+ * or change the CPU's play here — there are no cards to press.
+ */
+export function buildCpuHuddleOverlay(opts: {
+  playName: string;
+  kind: 'RUN' | 'PASS' | 'PUNT' | 'FIELD_GOAL';
+  formation: string;
+}): HTMLElement {
+  const overlay = el('div', 'gsn-huddle gsn-huddle--cpu');
+  overlay.setAttribute('data-testid', 'huddle-overlay');
+  overlay.setAttribute('data-cpu', 'true');
+
+  const head = el('div', 'gsn-huddle__cpu-head', 'CPU OFFENSE');
+  head.setAttribute('data-testid', 'cpu-offense-head');
+
+  const card = el('div', 'gsn-huddle__card gsn-huddle__card--cpu');
+  card.setAttribute('data-testid', 'cpu-play');
+  card.append(
+    el('span', 'gsn-huddle__card-name', `— ${opts.playName}`),
+    el('span', 'gsn-huddle__card-kind', opts.kind),
+    el('span', 'gsn-huddle__card-formation', opts.formation.toUpperCase()),
+  );
+
+  overlay.append(head, card);
+  return overlay;
+}
+
 export type BannerKind =
   | 'TOUCHDOWN'
   | 'TURNOVER'

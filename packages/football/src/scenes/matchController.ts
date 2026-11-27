@@ -8,6 +8,7 @@
  * and this state machine together replace the former scene methods.
  */
 import type { GameSession, HazardHit } from '../sim/index';
+import { getOffensePlay } from '../sim/index';
 import { buildLivePlayInput } from '../field/fieldMapper';
 import type { ArcadeButton, InputSnapshot } from '@monster-league/shared-core';
 import { LivePlay, type LivePlayResult } from '../field/LivePlay';
@@ -17,6 +18,7 @@ import type { BannerKind } from '../ui/hud';
 import type { ActorAnimation, ActorPresentationState } from './spriteRenderer';
 import { updateLive, commitPass } from './matchSim';
 import { updateBanner } from './matchOutcome';
+import { cpuOnOffense, cpuCallOffense } from './cpuOpponent';
 
 export type PlayKind = 'RUN' | 'PASS' | 'PUNT' | 'FIELD_GOAL';
 
@@ -78,6 +80,18 @@ export interface MatchRuntime {
 
   mode: 'PICK' | 'PRE_SNAP' | 'LIVE' | 'BANNER';
   selectedPlayIndex: number;
+  /** CPU offense override: the away team's chosen offense play id this down (null
+   *  while the human calls its own play). Overrides the A/B/C catalog in
+   *  `prepareLivePlay`. Set the moment the CPU calls its play, so the CPU-huddle
+   *  overlay can name it before the play is actually selected. */
+  cpuPlayId: string | null;
+  /** When the CPU finishes its huddle and selects the play (wall-clock reference),
+   *  set at CPU pick time while the "CPU OFFENSE" overlay is showing. */
+  cpuHuddleClock: number;
+  /** When the CPU snaps (scene-elapsed wall-clock reference), set at CPU pick time. */
+  cpuSnapClock: number;
+  /** CPU pass beat counter: open windows at ~0.5 s, throw ~0.4 s later. */
+  cpuPassClock: number;
   bannerText: string;
   bannerKind: BannerKind;
   bannerTimer: number;
@@ -149,6 +163,7 @@ export class MatchController {
   /** Faithful port of `MatchScene.confirmPlay`. */
   confirmPlay(index: number): void {
     this.s.selectedPlayIndex = index;
+    this.s.cpuPlayId = null;
     this.s.session.selectPlays(catalogForDown(this.s.session.down)[index]!.id, DEFAULT_DEFENSE);
     this.s.mode = 'PRE_SNAP';
     // Build the live play at pick time so the PRE_SNAP formation renders its
@@ -157,8 +172,42 @@ export class MatchController {
     this.prepareLivePlay();
   }
 
+  /**
+   * CPU offense call: ask the AI coach for the away team's play and feed it to
+   * `selectPlays` (defense stays `DEFAULT_DEFENSE` for the human side). No human
+   * A/B/C enters this path — the CPU plays itself. Called after the CPU-huddle
+   * overlay has shown the play name for a readable beat.
+   */
+  private confirmCpuPlay(): void {
+    if (this.s.gameOver) return;
+    if (!this.s.cpuPlayId) return;
+    const playId = this.s.cpuPlayId;
+    this.s.session.selectPlays(playId, DEFAULT_DEFENSE);
+    this.s.mode = 'PRE_SNAP';
+    // Readable beat before the CPU snaps: ~0.8–1.2 s in PRE_SNAP.
+    this.s.cpuSnapClock = performance.now() + 800 + (playId.length % 5) * 100;
+    this.prepareLivePlay();
+  }
+
   private updatePick(): void {
     if (this.s.gameOver) return;
+    // CPU offense: the away team calls its own play without any human A/B/C. It
+    // runs a two-phase huddle — first name the play in the "CPU OFFENSE" overlay
+    // for a beat, then select it and move to PRE_SNAP.
+    if (cpuOnOffense(this.s.session)) {
+      if (this.s.cpuPlayId === null) {
+        const decision = cpuCallOffense(this.s.session);
+        this.s.cpuPlayId = decision.offensePlayId;
+        this.s.cpuHuddleClock =
+          performance.now() + 800 + (decision.offensePlayId.length % 5) * 100;
+        // Stay in PICK so the CPU-offense overlay renders before the snap beat.
+      } else if (performance.now() >= this.s.cpuHuddleClock) {
+        this.confirmCpuPlay();
+      }
+      return;
+    }
+    // Human offense: clear any stale CPU override before the A/B/C pick list.
+    this.s.cpuPlayId = null;
     // The pick list depends on the down: 4th down offers special teams (punt/FG).
     const catalog = catalogForDown(this.s.session.down);
     if (this.s.pressedBtn('A')) this.s.selectedPlayIndex = 0;
@@ -173,6 +222,11 @@ export class MatchController {
   }
 
   private updatePreSnap(): void {
+    // CPU offense: snap after the readable beat; the human C must not snap for it.
+    if (cpuOnOffense(this.s.session)) {
+      if (performance.now() >= this.s.cpuSnapClock) this.beginLivePlay();
+      return;
+    }
     if (this.s.pressedBtn('C')) this.beginLivePlay();
   }
 
@@ -180,7 +234,12 @@ export class MatchController {
    *  call again at snap time (idempotent: everything below is recomputed from the
    *  same unchanged session state, and the sim clock has not advanced yet). */
   prepareLivePlay(): void {
-    const play = catalogForDown(this.s.session.down)[this.s.selectedPlayIndex]!;
+    // CPU offense: use the coach's chosen play id (bypassing the human A/B/C
+    // catalog, which never contains punts/FGs/deep routes); otherwise the human
+    // catalog index.
+    const play = this.s.cpuPlayId
+      ? { id: this.s.cpuPlayId, kind: getOffensePlay(this.s.cpuPlayId).kind }
+      : catalogForDown(this.s.session.down)[this.s.selectedPlayIndex]!;
     this.s.isPassPlay = play.kind === 'PASS';
     this.s.isKickPlay = play.kind === 'PUNT' || play.kind === 'FIELD_GOAL';
     // Capture the starting LOS for this down; every projection below uses it even
@@ -240,6 +299,7 @@ export class MatchController {
     this.s.heldThrowKey = null;
     this.s.windowsOpen = false;
     this.s.windowOpenPressConsumed = false;
+    this.s.cpuPassClock = 0;
     this.s.ballFlight = null;
     this.s.damagePopups = [];
     this.s.casualties = [];

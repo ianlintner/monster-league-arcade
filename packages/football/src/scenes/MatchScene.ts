@@ -137,10 +137,19 @@ export class MatchScene extends Phaser.Scene {
    *  starting LOS rather than the already-advanced one (else the formation shifts
    *  again by the gained yardage, or across the field after a turnover). */
   liveLos = 0;
-  /** Whether the current live play is a pass (QB drops back, A/B/C = receivers). */
+  /** Whether the current play is a pass (QB drops back, A/B/C = receivers). */
   isPassPlay = false;
   /** Whether the current play is a punt / field-goal attempt (C = kick meter). */
   isKickPlay = false;
+  /** CPU offense override: the away team's chosen play id this down (null while
+   *  the human calls its own play). See `matchController.MatchRuntime`. */
+  cpuPlayId: string | null = null;
+  /** Wall-clock reference for when the CPU finishes its huddle and selects the play. */
+  cpuHuddleClock = 0;
+  /** Wall-clock reference for when the CPU snaps after its PRE_SNAP beat. */
+  cpuSnapClock = 0;
+  /** Elapsed seconds into the CPU's live pass play (open windows → throw). */
+  cpuPassClock = 0;
   /** Hold time on C during a kick play → meter sweep position. */
   kickHoldMs = 0;
   /** Locked meter value (0..1) once the kicker taps C. */
@@ -356,6 +365,10 @@ export class MatchScene extends Phaser.Scene {
     this.highlightDefender = -1;
     this.isPassPlay = false;
     this.isKickPlay = false;
+    this.cpuPlayId = null;
+    this.cpuHuddleClock = 0;
+    this.cpuSnapClock = 0;
+    this.cpuPassClock = 0;
     this.kickLocked = null;
     this.windowsOpen = false;
     this.ballFlight = null;
@@ -567,6 +580,7 @@ export class MatchScene extends Phaser.Scene {
       bannerText: this.bannerText,
       isKickPlay: this.isKickPlay,
       kickLocked: this.kickLocked,
+      cpuPlayId: this.cpuPlayId,
       huddleFingerprint: this.huddleFingerprint,
     };
     const { readyText, controlLine } = composeReadyLine(hudState);
@@ -582,6 +596,7 @@ export class MatchScene extends Phaser.Scene {
       bannerText: this.bannerText,
       isKickPlay: this.isKickPlay,
       kickLocked: this.kickLocked,
+      cpuPlayId: this.cpuPlayId,
       huddleFingerprint: this.huddleFingerprint,
     };
     updateScorebug(document, this.session);
@@ -612,6 +627,7 @@ export class MatchScene extends Phaser.Scene {
       windowsOpen: () => this.windowsOpen,
       ballInFlight: () => this.ballFlight !== null,
       selectedPlayIndex: () => this.selectedPlayIndex,
+      cpuPlayId: () => this.cpuPlayId,
       lastResult: () => this.session?.lastResult ?? null,
       hazardManager: () => this.hazardManager,
       spriteBackedActorCount: () => this.spriteBackedActorCount,

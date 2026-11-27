@@ -6,6 +6,7 @@
  * `matchController.updateMode`'s LIVE branch. Owns no state.
  */
 import type { GameSession, Slot } from '../sim/index';
+import { getOffensePlay } from '../sim/index';
 import { projectActor } from '../field/fieldMapper';
 import { projectToScreen, toPhaserColor } from '@monster-league/shared-core';
 import type { LiveActorState } from '../field/LivePlay';
@@ -14,6 +15,8 @@ import { styleForHold } from '../field/Ballistics';
 import { resolveKick, meterValue } from '../field/KickMeter';
 import { catalogForDown, type MatchRuntime } from './matchController';
 import { showBanner, collectDamageAndCasualties, commitOutcome } from './matchOutcome';
+import { cpuOnOffense, cpuDrivePass } from './cpuOpponent';
+import { updateHumanPassInput } from './humanPassInput';
 
 export function updateLive(s: MatchRuntime, dt: number): void {
   // Ball-in-flight animation runs to completion before further input lands.
@@ -32,7 +35,7 @@ export function updateLive(s: MatchRuntime, dt: number): void {
     return;
   }
 
-  if (s.pressedBtn('B') && !s.isPassPlay) {
+  if (s.pressedBtn('B') && !s.isPassPlay && !cpuOnOffense(s.session)) {
     // Defense: cycle which defender is the highlighted "user" pursuer.
     s.highlightDefender = (s.highlightDefender + 1) % 7;
   }
@@ -40,71 +43,33 @@ export function updateLive(s: MatchRuntime, dt: number): void {
   // Pass plays: C opens the receiving windows (scope: behind LOS); A/B/C throw
   // to the matching receiver while the windows are open. Hold length sets style.
   if (s.isPassPlay) {
-    const cHeld = s.buttonHeld('C');
-
-    // The C press that opens the windows must NOT also throw to receiver C in
-    // the same press: it is consumed once. Only a *fresh* subsequent C press (its
-    // own keydown) — while windows are already open — is treated as a throw to C.
-    // When windows are still closed, the same C press only opens them.
-    if (s.pressedBtn('C') && !s.windowsOpen && !s.windowOpenPressConsumed) {
-      // Windows may only open while the QB is behind (or on) the line of
-      // scrimmage. Once the QB scrambles downfield the option is unavailable.
-      const qb = live.snapshot().actors.find((a) => a.id === live.carrier.id);
-      if (qb && qb.x <= 0) {
-        s.windowsOpen = true;
-        s.passHoldMs = 0;
-        // Consume this C press so it cannot double as a throw, until a genuinely
-        // new C keydown arrives (cleared on the next input edge).
-        s.windowOpenPressConsumed = true;
-      }
-    }
-    // A fresh C keydown re-arms the throw-to-C path (and window re-open); cleared
-    // per-input-edge so holding C through several render frames never re-opens the
-    // windows and never re-fires the opening consume.
-
-    if (s.windowsOpen) {
-      // A/B throw on *release*, so a held receiver button accumulates hold time
-      // and only launches (lob vs bullet by duration) when the player lets go.
-      if (s.buttonHeld('A')) {
-        if (!s.heldThrowKey) s.heldThrowKey = 'A';
-      } else if (s.buttonHeld('B')) {
-        if (!s.heldThrowKey) s.heldThrowKey = 'B';
-      }
-      const aUp = s.releasedBtn('A');
-      const bUp = s.releasedBtn('B');
-      const released =
-        s.heldThrowKey === 'A' && aUp ? 'A' : s.heldThrowKey === 'B' && bUp ? 'B' : null;
-      // C throws to receiver C, but only on a deliberate press AFTER the window-
-      // opening press (so opening the windows never instantly picks C).
-      const cUp = s.releasedBtn('C');
-      const cTarget = !s.windowOpenPressConsumed && cUp ? 'C' : null;
-
-      // Accumulate hold time by *elapsed* time (seconds → ms), not a fixed 16 ms
-      // per rendered frame: otherwise the same physical hold produces a lob or a
-      // bullet depending on refresh rate and shorter air time on faster displays.
-      if (s.heldThrowKey || (cHeld && !s.windowOpenPressConsumed)) {
-        s.passHoldMs += dt * 1000;
-      } else if (!released && !cTarget) {
-        s.passHoldMs = 0;
-      }
-
-      const target = released ?? cTarget;
-      if (target) {
-        commitPass(s, target);
-        s.heldThrowKey = null;
-        return;
-      }
+    // CPU offense: the away QB opens its windows on a beat, then throws to the
+    // receiver the existing pass-window logic scores best. No human key feeds it.
+    if (cpuOnOffense(s.session)) {
+      cpuDrivePass(
+        s,
+        dt,
+        live.carrier.x,
+        (a) => {
+          const r = receiverFor(s, a);
+          return r ? { id: r.id, x: r.x, y: r.y } : undefined;
+        },
+        (target) => commitPass(s, target),
+        live,
+      );
+      // Fall through to the fixed-step loop with zero steer (below). A throw that
+      // launched sets `ballFlight`, which the in-flight guard eats next frame.
     } else {
-      s.passHoldMs = 0;
-      s.heldThrowKey = null;
+      updateHumanPassInput(s, dt, live, (target) => commitPass(s, target));
     }
   }
 
   // Feed the carrier command *inside* the fixed-step loop below, because the
   // nasty-field snapshot (hex inversion, Bat-Wing speed, grenade triggers) is
   // computed per step and must color the very same command that step consumes.
-  const turboHeld = s.buttonHeld('C');
-  const pressedBThisTick = s.pressedBtn('B') && s.isPassPlay === false;
+  const cpuOff = cpuOnOffense(s.session);
+  const turboHeld = cpuOff ? false : s.buttonHeld('C');
+  const pressedBThisTick = (cpuOff ? false : s.pressedBtn('B')) && s.isPassPlay === false;
 
   // Advance a fixed-timestep 60 Hz simulation: accumulate the elapsed render
   // time and consume exactly the fixed steps due, so the field runs at real time
@@ -132,8 +97,8 @@ export function updateLive(s: MatchRuntime, dt: number): void {
     });
 
     // Hex of Confusion inverts the carrier's steering while its timer is live.
-    let sx = s.playerInput.x;
-    let sy = s.playerInput.y;
+    let sx = cpuOff ? 0 : s.playerInput.x;
+    let sy = cpuOff ? 0 : s.playerInput.y;
     if (s.nastySnap.hexRemaining > 0) {
       sx = -sx;
       sy = -sy;
@@ -142,7 +107,7 @@ export function updateLive(s: MatchRuntime, dt: number): void {
     live.command({
       steerX: sx,
       steerY: sy,
-      dive: s.pressedBtn('A') && !s.isPassPlay,
+      dive: (cpuOff ? false : s.pressedBtn('A')) && !s.isPassPlay,
       turbo: turboHeld,
       frictionMult: s.lastFriction,
       slowMult: s.lastSlow,
@@ -219,12 +184,18 @@ export function updateLive(s: MatchRuntime, dt: number): void {
  * special-teams outcome instead of being dead code.
  */
 function updateKick(s: MatchRuntime, dt: number): void {
-  const play = catalogForDown(s.session.down)[s.selectedPlayIndex]!;
-  const cHeld = s.buttonHeld('C');
+  const play = s.cpuPlayId
+    ? { id: s.cpuPlayId, kind: getOffensePlay(s.cpuPlayId).kind }
+    : catalogForDown(s.session.down)[s.selectedPlayIndex]!;
+  const cHeld = cpuOnOffense(s.session) ? true : s.buttonHeld('C');
 
   if (s.kickLocked === null) {
     if (cHeld) {
       s.kickHoldMs += dt * 1000; // ms like the pass hold timer
+      // CPU kicks: lock at a fair middle-of-the-meter value after a short sweep.
+      if (cpuOnOffense(s.session) && s.kickHoldMs >= 450) {
+        s.kickLocked = meterValue(s.kickHoldMs / 1000);
+      }
     } else if (s.kickHoldMs > 0) {
       // Released after a hold → lock the current sweep position.
       s.kickLocked = meterValue(s.kickHoldMs / 1000);
