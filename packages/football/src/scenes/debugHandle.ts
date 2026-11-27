@@ -23,6 +23,7 @@ export interface DebugHandleSurface {
   windowsOpen: () => boolean;
   ballInFlight: () => boolean;
   selectedPlayIndex: () => number;
+  cpuPlayId: () => string | null;
   lastResult: () => GameSession['lastResult'] | null;
   hazardManager: () => HazardManager | null;
   spriteBackedActorCount: () => number;
@@ -55,9 +56,9 @@ export function installDebugHandle(s: DebugHandleSurface): void {
   const bannerKind = () => s.bannerKind();
   const aiDecision = () => {
     // Debug probe only: "what would the AI coach call for the team currently in
-    // possession on offense?" This is NOT live gameplay wiring — the human
-    // offense still calls its own play via `selectPlays`, and no `callNasty` is
-    // driven from here. Wiring a 1P-vs-AI opponent loop is deferred (see PR note).
+    // possession on offense?" It exists for assertions and dev inspection; live
+    // CPU offense now reaches `decideCoachPlay` through `cpuCallOffense` in
+    // `cpuOpponent.ts`, not through this handle. No `callNasty` is driven here.
     const sess = s.session();
     if (!sess) return null;
     const team = sess.possession;
@@ -95,6 +96,12 @@ export function installDebugHandle(s: DebugHandleSurface): void {
     },
     get down() {
       return session()?.down ?? null;
+    },
+    get possession() {
+      return session()?.possession ?? null;
+    },
+    get cpuPlayId() {
+      return s.cpuPlayId();
     },
     get carrierId() {
       return live()?.carrier.id ?? null;

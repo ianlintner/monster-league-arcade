@@ -9,6 +9,7 @@
  */
 import {
   buildHuddleOverlay,
+  buildCpuHuddleOverlay,
   downDistanceLabel,
   factionName,
   formatClock,
@@ -16,6 +17,7 @@ import {
 } from '../ui/hud';
 import type { FactionId } from '@monster-league/shared-core';
 import type { GameSession } from '../sim/index';
+import { getOffensePlay } from '../sim/index';
 
 /** Play kind, mirroring MatchScene's `PlayKind` (kept local to avoid importing the
  *  scene just for a type). */
@@ -28,6 +30,9 @@ export interface HudState {
   bannerText: string;
   isKickPlay: boolean;
   kickLocked: number | null;
+  /** The CPU's chosen offense play id while the away team has the ball in its
+   *  huddle (null on human downs and on defense). Drives the CPU-offense overlay. */
+  cpuPlayId: string | null;
   /** Fingerprint of the last huddle overlay build; mutated in place on rebuild. */
   huddleFingerprint: string;
 }
@@ -48,6 +53,11 @@ export function composeReadyLine(s: HudState): ReadyLine {
   let prompt = '';
   switch (s.mode) {
     case 'PICK': {
+      if (s.cpuPlayId) {
+        // CPU offense: no human pick list — name the AI's called play.
+        prompt = `CPU OFFENSE — ${getOffensePlay(s.cpuPlayId).name}`;
+        break;
+      }
       const cat = catalogForDown(s.session.down);
       prompt = `Call the play — [A=J] ${cat[0]!.label} · [B=K] ${cat[1]!.label} · [C=L] ${cat[2]!.label}`;
       break;
@@ -170,6 +180,19 @@ export function syncHuddle(doc: Document, s: HudState): void {
     host.replaceChildren();
     host.hidden = true;
     s.huddleFingerprint = '';
+    return;
+  }
+  // CPU offense: show a single non-interactive card naming the called play. The
+  // fingerprint is keyed on the play id so a new down's play rebuilds the overlay.
+  if (s.cpuPlayId) {
+    const play = getOffensePlay(s.cpuPlayId);
+    const fingerprint = `cpu:${s.cpuPlayId}`;
+    if (fingerprint === s.huddleFingerprint) return;
+    s.huddleFingerprint = fingerprint;
+    host.replaceChildren(
+      buildCpuHuddleOverlay({ playName: play.name, kind: play.kind, formation: play.formation }),
+    );
+    host.hidden = false;
     return;
   }
   const cat = catalogForDown(s.session.down);

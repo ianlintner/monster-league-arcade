@@ -20,6 +20,7 @@ interface Snap {
   mode: string;
   down: number;
   quarter: number;
+  possession: string;
   score: { home: number; away: number } | null;
 }
 
@@ -31,6 +32,7 @@ const snap = (page: Page): Promise<Snap> =>
       mode: String(h.mode ?? ''),
       down: Number(h.down ?? 1),
       quarter: Number(h.quarter ?? 0),
+      possession: String(h.possession ?? ''),
       score: (h.score as Snap['score']) ?? null,
     };
   });
@@ -49,6 +51,15 @@ test('real-keyboard full match: play to GAME_OVER, see the result, restart with 
     const s = await snap(page);
     if (s.phase === 'GAME_OVER') break;
     expect(Date.now(), 'match did not reach GAME_OVER in time').toBeLessThan(deadline);
+
+    // CPU possession: the away team calls and runs its own down — wait it out,
+    // never press a key (a stray A/B/C would neither help nor hurt, but the CPU
+    // must drive the whole down itself; the extra-point/kickoff collapse happens
+    // in the BANNER tick like every other possession).
+    if (s.possession === 'away') {
+      await page.waitForTimeout(200);
+      continue;
+    }
 
     if (s.mode === 'PICK') {
       // Always pick a run: A (Inside Gore Run) normally, C (Go For It) on 4th

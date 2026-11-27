@@ -45,6 +45,7 @@ import {
 import { ActorPresenter, type PresentScene } from './actorPresenter';
 import { installDebugHandle, type DebugHandleSurface } from './debugHandle';
 import { MatchController } from './matchController';
+import { cpuOnOffense } from './cpuOpponent';
 import { quarterSecondsFromSearch } from './matchConfig';
 
 export const CANVAS_WIDTH = 640;
@@ -137,10 +138,19 @@ export class MatchScene extends Phaser.Scene {
    *  starting LOS rather than the already-advanced one (else the formation shifts
    *  again by the gained yardage, or across the field after a turnover). */
   liveLos = 0;
-  /** Whether the current live play is a pass (QB drops back, A/B/C = receivers). */
+  /** Whether the current play is a pass (QB drops back, A/B/C = receivers). */
   isPassPlay = false;
   /** Whether the current play is a punt / field-goal attempt (C = kick meter). */
   isKickPlay = false;
+  /** CPU offense override: the away team's chosen play id this down (null while
+   *  the human calls its own play). See `matchController.MatchRuntime`. */
+  cpuPlayId: string | null = null;
+  /** Wall-clock reference for when the CPU finishes its huddle and selects the play. */
+  cpuHuddleClock = 0;
+  /** Wall-clock reference for when the CPU snaps after its PRE_SNAP beat. */
+  cpuSnapClock = 0;
+  /** Elapsed seconds into the CPU's live pass play (open windows → throw). */
+  cpuPassClock = 0;
   /** Hold time on C during a kick play → meter sweep position. */
   kickHoldMs = 0;
   /** Locked meter value (0..1) once the kicker taps C. */
@@ -356,6 +366,10 @@ export class MatchScene extends Phaser.Scene {
     this.highlightDefender = -1;
     this.isPassPlay = false;
     this.isKickPlay = false;
+    this.cpuPlayId = null;
+    this.cpuHuddleClock = 0;
+    this.cpuSnapClock = 0;
+    this.cpuPassClock = 0;
     this.kickLocked = null;
     this.windowsOpen = false;
     this.ballFlight = null;
@@ -397,7 +411,13 @@ export class MatchScene extends Phaser.Scene {
       // the pick so the down proceeds.
       if (penalty?.kind === 'DELAY_OF_GAME') {
         if (this.mode === 'PICK') {
-          this.match.confirmPlay(this.selectedPlayIndex);
+          // CPU offense: a delay-of-game during the CPU huddle must NOT force a
+          // human-catalog pick — the CPU calls its own play on its own beat. The
+          // penalty yards are already applied by `tickPlayClock`; the AI coach will
+          // call the next down from the backed-up spot.
+          if (!cpuOnOffense(this.session)) {
+            this.match.confirmPlay(this.selectedPlayIndex);
+          }
         } else if (this.mode === 'PRE_SNAP') {
           // The penalty moved `session.los` back 5 yards, but the formation was
           // built at pick time from the old LOS. Rebuild it so the actors, ball
@@ -567,6 +587,7 @@ export class MatchScene extends Phaser.Scene {
       bannerText: this.bannerText,
       isKickPlay: this.isKickPlay,
       kickLocked: this.kickLocked,
+      cpuPlayId: this.cpuPlayId,
       huddleFingerprint: this.huddleFingerprint,
     };
     const { readyText, controlLine } = composeReadyLine(hudState);
@@ -582,6 +603,7 @@ export class MatchScene extends Phaser.Scene {
       bannerText: this.bannerText,
       isKickPlay: this.isKickPlay,
       kickLocked: this.kickLocked,
+      cpuPlayId: this.cpuPlayId,
       huddleFingerprint: this.huddleFingerprint,
     };
     updateScorebug(document, this.session);
@@ -612,6 +634,7 @@ export class MatchScene extends Phaser.Scene {
       windowsOpen: () => this.windowsOpen,
       ballInFlight: () => this.ballFlight !== null,
       selectedPlayIndex: () => this.selectedPlayIndex,
+      cpuPlayId: () => this.cpuPlayId,
       lastResult: () => this.session?.lastResult ?? null,
       hazardManager: () => this.hazardManager,
       spriteBackedActorCount: () => this.spriteBackedActorCount,
