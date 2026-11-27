@@ -20,7 +20,13 @@ import { updateLive, commitPass } from './matchSim';
 import { settleExpiredPeriod, updateBanner } from './matchOutcome';
 import { cpuOnOffense, cpuCallOffense } from './cpuOpponent';
 import { assignDefaultDefender } from './defenseInput';
-import { resetRouter, tickNotice, updateRouter, type PreSnapRuntime } from './preSnapRouter';
+import {
+  menuOpen,
+  resetRouter,
+  tickNotice,
+  updateRouter,
+  type PreSnapRuntime,
+} from './preSnapRouter';
 
 export type PlayKind = 'RUN' | 'PASS' | 'PUNT' | 'FIELD_GOAL';
 
@@ -225,13 +231,19 @@ export class MatchController {
   }
 
   private updatePreSnap(dt: number): void {
-    // CPU offense: snap after the readable beat; the human C must not snap for it.
+    // The combo router runs on BOTH sides of the ball. On defense (CPU possession)
+    // the human can still call A / A→C→A/B/C nasties, and the menu timeout must
+    // tick while the CPU waits to snap. Calling it first also means a bare C is
+    // consumed here as a non-snap on defense — the CPU owns that snap.
+    const route = updateRouter(this.s, dt, () => this.prepareLivePlay());
     if (cpuOnOffense(this.s.session)) {
-      if (performance.now() >= this.s.cpuSnapClock) this.beginLivePlay();
+      // Hold the CPU's readable beat while a defensive menu is open, otherwise
+      // the A→C→A/B/C combo the HUD advertises is unreachable in the ~1 s window.
+      if (!menuOpen(this.s) && performance.now() >= this.s.cpuSnapClock) this.beginLivePlay();
       return;
     }
-    // Human pre-snap combo router: bare C hikes; A opens the audible/nasty menu.
-    if (updateRouter(this.s, dt, () => this.prepareLivePlay()) === 'HIKE') this.beginLivePlay();
+    // Human offense: a bare C from IDLE hikes; a C inside a menu never does.
+    if (route === 'HIKE') this.beginLivePlay();
   }
 
   /** Build the 14-actor `LivePlay` and reset per-down presentation state. Safe to

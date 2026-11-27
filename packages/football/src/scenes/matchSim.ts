@@ -69,7 +69,9 @@ export function updateLive(s: MatchRuntime, dt: number): void {
   const cpuOff = cpuOnOffense(s.session);
   const turboHeld = cpuOff ? false : s.buttonHeld('C');
   // B fires the carried weapon (grenades / Ghoul Gas). On a pass play B is the throw key
-  // while receiver windows are open, so it only fires the weapon outside that window.
+  // only while receiver windows are open, so it is deliberately available in the
+  // QB's pre-window dropback and after the window shuts — the weapon is not gated
+  // for the whole pass play.
   // One press edge is consumed by the first fixed step so a frame running several steps
   // cannot throw every grenade at once.
   let pressedBThisTick = (cpuOff ? false : s.pressedBtn('B')) && !(s.isPassPlay && s.windowsOpen);

@@ -869,7 +869,8 @@ export type AudibleSelection =
  * Genesis combo:
  *   A -> A/B        standard audible (swap to alternate play 1 or 2)
  *   A -> C -> A/B/C Nasty Audible (pick one of three dirty tricks)
- * Pressing B in any menu cancels.
+ * Inside AUDIBLE_MENU, A and B select alternates 1 and 2 (B does not cancel);
+ * C opens the Nasty menu. Inside NASTY_MENU, A/B/C pick slots 1/2/3.
  */
 export class AudibleController {
   state: AudibleState = 'IDLE';

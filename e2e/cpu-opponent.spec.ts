@@ -84,7 +84,18 @@ test('CPU opponent: away down advances PICK→PRE_SNAP→LIVE→whistle on its o
   // the exact path the stale-play bug broke — is exercised whenever the drive
   // does not end on the first snap. On every down the CPU re-arms a fresh call,
   // shows the huddle beat, then runs PICK→PRE_SNAP→LIVE→whistle on its own.
-  await expect.poll(async () => (await snap(page)).mode, { timeout: 10_000 }).toBe('PICK');
+  // Wait for a *stable* CPU PICK: the possession flip can land on a frame where
+  // mode is already PICK but the coach has not armed cpuPlayId yet. Asserting on
+  // that frame flakes under parallel load (the call is set one beat later).
+  await expect
+    .poll(
+      async () => {
+        const s = await snap(page);
+        return s.possession === 'away' && s.mode === 'PICK' && s.cpuPlayId !== null;
+      },
+      { timeout: 10_000 },
+    )
+    .toBe(true);
 
   const cpuDownDeadline = Date.now() + 240_000;
   let cpuDownsSeen = 0;
@@ -101,7 +112,10 @@ test('CPU opponent: away down advances PICK→PRE_SNAP→LIVE→whistle on its o
       // While the CPU huddles, its call is armed and named in the overlay. On a
       // SECOND consecutive down this only renders because the call was cleared
       // between downs and freshly re-armed (the stale-play bug skipped it).
-      expect(s.cpuPlayId).not.toBeNull();
+      await expect
+        .poll(async () => (await snap(page)).cpuPlayId, { timeout: 5_000 })
+        .not.toBeNull();
+      expect((await snap(page)).cpuPlayId).not.toBeNull();
       await expect(page.getByTestId('huddle-overlay')).toBeVisible();
       await expect(page.getByTestId('cpu-offense-head')).toBeVisible();
       if (cpuDownsSeen === 0) {

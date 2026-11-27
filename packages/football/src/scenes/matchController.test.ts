@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import type { ArcadeButton } from '@monster-league/shared-core';
 import { MatchController, DEFAULT_DEFENSE, type MatchRuntime } from './matchController';
 import { updateBanner } from './matchOutcome';
 import { GameSession } from '../sim/GameSession';
@@ -267,5 +268,57 @@ describe('MatchController CPU offense cycle', () => {
     expect(s.cpuPlayId).toBe(called);
     expect(getOffensePlay(called).kind).toBe('PASS'); // 1st & 10 open field
     expect(DEFAULT_DEFENSE).toBe('BONE_CRUSH_BASE');
+  });
+
+  it('routes real defensive A→C→A nasties through the controller and never lets C snap for the CPU', () => {
+    const s = makeRuntime(awaySession());
+    const pressed = new Set<ArcadeButton>();
+    s.pressedBtn = (b) => pressed.has(b);
+    const c = new MatchController(s);
+    const press = (b: ArcadeButton): void => {
+      pressed.add(b);
+      c.updateMode(0.016); // one edge per frame, like the InputManager
+      pressed.delete(b);
+    };
+
+    // PICK → PRE_SNAP on the CPU huddle beat (selectPlays arms the defense play).
+    c.updateMode(0);
+    now = s.cpuHuddleClock + 1;
+    c.updateMode(0);
+    expect(s.mode).toBe('PRE_SNAP');
+    expect(cpuOnOffense(s.session)).toBe(true);
+    expect(s.session.selectedDefensePlayId).toBe(DEFAULT_DEFENSE);
+
+    // With the CPU's own snap still in the future, a bare C does NOT snap and
+    // does not open a menu — the router consumed it as a non-hike on defense.
+    s.cpuSnapClock = now + 5000;
+    press('C');
+    expect(s.mode).toBe('PRE_SNAP');
+    expect(s.audible).toBeNull();
+    expect(s.session.effects.active).toEqual([]);
+
+    // A→C→A calls QB Crypt Blitz even though the CPU snap clock has already
+    // elapsed: the open menu holds the snap so the combo is actually reachable.
+    s.cpuSnapClock = 0;
+    press('A');
+    expect(s.mode).toBe('PRE_SNAP');
+    expect(s.audible?.state).toBe('AUDIBLE_MENU');
+    press('C');
+    expect(s.mode).toBe('PRE_SNAP');
+    expect(s.audible?.state).toBe('NASTY_MENU');
+    // Give the CPU a future beat for the resolving press so the callout can be
+    // inspected in PRE_SNAP; the snap itself is proven on the next frame below.
+    s.cpuSnapClock = now + 5000;
+    press('A');
+    expect(s.session.effects.active).toContain('QB_CRYPT_BLITZ');
+    expect(s.nastyNoticeKind).toBe('call');
+    expect(s.nastyNotice).toContain('QB CRYPT BLITZ');
+    expect(s.audible).toBeNull();
+    expect(s.mode).toBe('PRE_SNAP');
+
+    // Once the combo resolves, the CPU's elapsed beat snaps on the next frame.
+    s.cpuSnapClock = 0;
+    c.updateMode(0.016);
+    expect(s.mode).toBe('LIVE');
   });
 });
