@@ -5,10 +5,9 @@ import { fileURLToPath } from 'node:url';
 /**
  * Directory that E2E screenshots are written to.
  *
- * Defaults to `docs/screenshots/` (committed deliverable art). The live-deploy
- * config (`playwright.live.config.ts`) sets `E2E_SCREENSHOT_DIR` to the
- * gitignored `docs/screenshots/live/` so `e2e:live` does not dirty the working
- * tree and therefore does not trip deploy.sh's clean-tree preflight.
+ * Defaults to `docs/screenshots/` (committed deliverable art). A temporary
+ * override via `E2E_SCREENSHOT_DIR` can point at a gitignored directory so
+ * non-deliverable captures do not dirty the working tree.
  */
 export const screenshotDir = (() => {
   const dir = join(
