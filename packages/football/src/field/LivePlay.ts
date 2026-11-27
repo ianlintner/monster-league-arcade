@@ -13,6 +13,8 @@
  * (positive = the offense's right). No Phaser imports.
  */
 
+import { stepControlledDefender } from './defenderControl';
+
 export interface LiveActorSpec {
   /** Stable id, e.g. `home-RB1`. */
   id: string;
@@ -71,6 +73,9 @@ export interface LivePlayCommand {
   slowMult?: number;
   /** Carrier speed multiplier from Bat-Wing Jet Boost (nasty effect) this tick. */
   speedMult?: number;
+  /** Human-controlled defender steer (-1..1 yard-space); ignored if no defender is controlled. */
+  defenderSteerX?: number;
+  defenderSteerY?: number;
 }
 
 export interface LiveActorState {
@@ -156,6 +161,10 @@ export const LIVE_TUNING = {
    * being swallowed by a full-speed rush the instant the ball is snapped.
    */
   snapReactionSeconds: 1.2,
+  /** A diving defender tackles at this wider reach (yards) and never whiffs on contact. */
+  defenderDiveRadius: 1.6,
+  /** A missed defender dive leaves him down (can't tackle or move) this long. */
+  defenderRecoverySeconds: 0.9,
   /** Fixed timestep. */
   dt: 1 / 60,
 } as const;
@@ -193,6 +202,13 @@ export class LivePlay {
   private frictionMult = 1;
   private slowMult = 1;
   private speedMult = 1;
+  /** Id of the human-controlled defender (null = all defenders run pursuit AI). */
+  private controlledId: string | null = null;
+  private defSteerX = 0;
+  private defSteerY = 0;
+  private defDiveHeld = false;
+  /** Seconds of knockdown left for defenders who missed a dive. */
+  private recovery = new Map<string, number>();
 
   constructor(input: LivePlayInput) {
     this.input = input;
@@ -241,6 +257,24 @@ export class LivePlay {
     this.frictionMult = cmd.frictionMult ?? 1;
     this.slowMult = cmd.slowMult ?? 1;
     this.speedMult = cmd.speedMult ?? 1;
+    this.defSteerX = clamp(cmd.defenderSteerX ?? 0, -1, 1);
+    this.defSteerY = clamp(cmd.defenderSteerY ?? 0, -1, 1);
+  }
+
+  /** The defender currently under human control (null if none). */
+  get controlledDefenderId(): string | null {
+    return this.controlledId;
+  }
+
+  /** Hand a defender to the human (null releases control back to pursuit AI). */
+  setControlledDefender(id: string | null): void {
+    const a = id === null ? null : this.actors.find((x) => x.id === id);
+    this.controlledId = a && a.side === 'DEFENSE' ? a.id : null;
+  }
+
+  /** Latch a dive-tackle request for the controlled defender (consumed by the next tick). */
+  defenderDive(): void {
+    this.defDiveHeld = true;
   }
 
   /** Advance one fixed 60 Hz tick with the last-commanded control state. */
@@ -274,6 +308,7 @@ export class LivePlay {
     this.advanceCarrier(dive, turbo);
 
     // Move every other actor by its AI role.
+    this.tickRecovery();
     this.advanceAI();
 
     // Resolve blocking engagement, tackle contact and bounds.
@@ -409,6 +444,40 @@ export class LivePlay {
     return { x: dx / m, y: dy / m };
   }
 
+  /** Count down knockdowns from missed defender dives; the defender gets back up. */
+  private tickRecovery(): void {
+    for (const [id, left] of this.recovery) {
+      const next = left - LIVE_TUNING.dt;
+      const a = this.actors.find((x) => x.id === id);
+      if (next > 0 || !a) {
+        if (a) this.recovery.set(id, next);
+        continue;
+      }
+      this.recovery.delete(id);
+      a.downed = false;
+    }
+  }
+
+  /**
+   * Move the human-controlled defender. Returns true when it handled the actor's
+   * movement this tick; false (no steer, no dive) hands it back to pursuit AI so
+   * an idle stick still plays defense instead of standing still.
+   */
+  private advanceControlled(a: LiveActorState, topSpeed: number): boolean {
+    const dive = this.defDiveHeld;
+    this.defDiveHeld = false;
+    const input = {
+      steerX: this.defSteerX,
+      steerY: this.defSteerY,
+      dive,
+      topSpeed,
+      target: this.carrier,
+    };
+    return stepControlledDefender(a, input, LIVE_TUNING, () =>
+      this.recovery.set(a.id, LIVE_TUNING.defenderRecoverySeconds),
+    );
+  }
+
   private advanceAI(): void {
     const carrier = this.carrier;
     // Blockers: offensive non-carriers that can engage a defender in contact.
@@ -416,6 +485,9 @@ export class LivePlay {
     for (const a of this.actors) {
       if (a.downed || a === carrier) continue;
       const spec = this.input.actors.find((s) => s.id === a.id)!;
+
+      // The human-controlled defender is steered / dives instead of pursuing.
+      if (a.id === this.controlledId && this.advanceControlled(a, spec.topSpeed)) continue;
 
       // A defender in contact with a blocker is engaged: the blocker stalls the
       // pursuit so the offensive line provides real protection on run plays.
@@ -487,6 +559,11 @@ export class LivePlay {
     for (const a of this.actors) {
       if (a.side !== 'DEFENSE' || a.downed) continue;
       const d = dist(c.x, c.y, a.x, a.y);
+      // A diving defender lunges for the tackle: wider reach, no break-free roll.
+      if (a.diving && d < LIVE_TUNING.defenderDiveRadius) {
+        this.end('TACKLE', a.id);
+        return;
+      }
       if (d < nearestDist) {
         nearestDist = d;
         nearest = a;

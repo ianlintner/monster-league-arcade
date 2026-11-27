@@ -106,6 +106,15 @@ export function installDebugHandle(s: DebugHandleSurface): void {
     get carrierId() {
       return live()?.carrier.id ?? null;
     },
+    // Read-only: the defender P1 currently steers (null while on offense).
+    get controlledDefenderId() {
+      return live()?.controlledDefenderId ?? null;
+    },
+    // Read-only: who made the stop once the down has whistled (null while live).
+    get tackler() {
+      const l = live();
+      return l && l.snapshot().outcome.kind === 'WHISTLE' ? l.result().tackler : null;
+    },
     get isPassPlay() {
       return isPassPlay();
     },

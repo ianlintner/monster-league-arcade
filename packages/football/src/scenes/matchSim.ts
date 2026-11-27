@@ -17,6 +17,7 @@ import { catalogForDown, type MatchRuntime } from './matchController';
 import { showBanner, collectDamageAndCasualties, commitOutcome } from './matchOutcome';
 import { cpuOnOffense, cpuDrivePass } from './cpuOpponent';
 import { updateHumanPassInput } from './humanPassInput';
+import { updateDefenseButtons } from './defenseInput';
 
 export function updateLive(s: MatchRuntime, dt: number): void {
   // Ball-in-flight animation runs to completion before further input lands.
@@ -35,10 +36,8 @@ export function updateLive(s: MatchRuntime, dt: number): void {
     return;
   }
 
-  if (s.pressedBtn('B') && !s.isPassPlay && !cpuOnOffense(s.session)) {
-    // Defense: cycle which defender is the highlighted "user" pursuer.
-    s.highlightDefender = (s.highlightDefender + 1) % 7;
-  }
+  // Defense (CPU has the ball): B switches defender, A dives the controlled one.
+  if (cpuOnOffense(s.session)) updateDefenseButtons(s, live);
 
   // Pass plays: C opens the receiving windows (scope: behind LOS); A/B/C throw
   // to the matching receiver while the windows are open. Hold length sets style.
@@ -109,6 +108,8 @@ export function updateLive(s: MatchRuntime, dt: number): void {
       steerY: sy,
       dive: (cpuOff ? false : s.pressedBtn('A')) && !s.isPassPlay,
       turbo: turboHeld,
+      defenderSteerX: cpuOff ? s.playerInput.x : 0,
+      defenderSteerY: cpuOff ? s.playerInput.y : 0,
       frictionMult: s.lastFriction,
       slowMult: s.lastSlow,
       // Bat-Wing Jet Boost (+65% carrier speed) threads through here.

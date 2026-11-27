@@ -19,6 +19,7 @@ import type { ActorAnimation, ActorPresentationState } from './spriteRenderer';
 import { updateLive, commitPass } from './matchSim';
 import { updateBanner } from './matchOutcome';
 import { cpuOnOffense, cpuCallOffense } from './cpuOpponent';
+import { assignDefaultDefender } from './defenseInput';
 
 export type PlayKind = 'RUN' | 'PASS' | 'PUNT' | 'FIELD_GOAL';
 
@@ -321,6 +322,8 @@ export class MatchController {
     // in LIVE with a populated `this.s.live` (otherwise `updateLive` early-returns
     // forever and the whistle never fires).
     this.s.mode = 'LIVE';
+    // CPU has the ball: P1 defends — start on the defender nearest the ball.
+    if (this.s.live && cpuOnOffense(this.s.session)) assignDefaultDefender(this.s, this.s.live);
   }
 
   /**
