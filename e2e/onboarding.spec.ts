@@ -76,6 +76,7 @@ test('prompt stays inside the 1280x720 viewport in PICK, PRE_SNAP and LIVE', asy
   await expect.poll(() => mode(page)).toBe('PRE_SNAP');
   await expectInViewport(page, 'onboard-prompt');
   await expect(prompt).toContainText('[C=L] Hike');
+  await expect(prompt).toContainText('[A=J] Audible');
 
   await tap(page, P1.C);
   await expect.poll(() => mode(page)).toBe('LIVE');
@@ -106,6 +107,6 @@ test('control-bar and prompt text list no input the scene does not handle', asyn
   await expect.poll(() => mode(page)).toBe('LIVE');
   await grab();
   for (const text of states) {
-    expect(text).not.toMatch(/audible|shift(?! defender)/i);
+    expect(text).not.toMatch(/shift(?! defender)/i);
   }
 });

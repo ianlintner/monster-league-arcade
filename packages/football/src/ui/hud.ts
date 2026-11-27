@@ -171,10 +171,44 @@ export interface HuddlePlayCard {
   formation: string;
 }
 
+/** One dirty-trick row: which combo calls it and whether its half charge is left. */
+export interface NastyDrawerEntry {
+  kind: NastyKind;
+  /** Menu slot letter after `A→C` (the router's combo is `[A→C → <slot>]`). */
+  slot: 'A' | 'B' | 'C';
+  charges: 0 | 1;
+  /** Optional qualifier (e.g. the play type the trick needs). */
+  note?: string;
+}
+
+/** Shared dirty-tricks drawer (huddle overlay + pre-snap overlay). */
+export function buildNastyDrawer(entries: NastyDrawerEntry[], testId: string): HTMLElement {
+  const drawer = el('div', 'gsn-huddle__drawer');
+  drawer.setAttribute('data-testid', testId);
+  drawer.append(el('span', 'gsn-huddle__drawer-label', 'DIRTY TRICKS'));
+  const count = entries.filter((e) => e.charges > 0).length;
+  if (count === 0) {
+    drawer.append(el('span', undefined, 'no charges'));
+  }
+  const list = el('span', 'gsn-huddle__drawer-list');
+  for (const e of entries) {
+    const entry = el('span', 'gsn-huddle__drawer-item');
+    entry.setAttribute('data-nasty', e.kind);
+    entry.setAttribute('data-charges', String(e.charges));
+    const note = e.note ? ` (${e.note})` : '';
+    entry.textContent = `${NASTY_INFO[e.kind].name}${note} · [A→C → ${e.slot}]${e.charges ? '' : ' · USED'}`;
+    list.append(entry);
+  }
+  drawer.append(list);
+  if (count > 0) drawer.append(el('span', undefined, `${count} charge${count === 1 ? '' : 's'}`));
+  return drawer;
+}
+
 export function buildHuddleOverlay(opts: {
   formations: string[];
   plays: HuddlePlayCard[];
-  availableNasties: NastyKind[];
+  /** Remaining kinds (slot letters assigned in order) or explicit drawer rows. */
+  availableNasties: (NastyKind | NastyDrawerEntry)[];
   /** Hidden P2 selection is obscured, but the card still renders for the tests. */
   hideSelection?: boolean;
 }): HTMLElement {
@@ -203,24 +237,10 @@ export function buildHuddleOverlay(opts: {
 
   // Dirty tricks drawer: display names + charges + the audible combo that calls
   // each (A -> C opens the nasty menu; A/B/C picks its slot, per `nastyMenu`).
-  const drawer = el('div', 'gsn-huddle__drawer');
-  drawer.setAttribute('data-testid', 'nasty-drawer');
-  drawer.append(el('span', 'gsn-huddle__drawer-label', 'DIRTY TRICKS'));
-  if (opts.availableNasties.length === 0) {
-    drawer.append(el('span', undefined, 'no charges'));
-  } else {
-    // One charge per Nasty per half: every remaining Nasty carries exactly one.
-    const count = opts.availableNasties.length;
-    const list = el('span', 'gsn-huddle__drawer-list');
-    for (const [i, kind] of opts.availableNasties.entries()) {
-      const slotLetter = (['A', 'B', 'C'] as const)[i % 3]!;
-      const entry = el('span', 'gsn-huddle__drawer-item');
-      entry.setAttribute('data-nasty', kind);
-      entry.textContent = `${NASTY_INFO[kind].name} · [A→C → ${slotLetter}]`;
-      list.append(entry);
-    }
-    drawer.append(list, el('span', undefined, `${count} charge${count === 1 ? '' : 's'}`));
-  }
+  const entries: NastyDrawerEntry[] = opts.availableNasties.map((n, i) =>
+    typeof n === 'string' ? { kind: n, slot: (['A', 'B', 'C'] as const)[i % 3]!, charges: 1 } : n,
+  );
+  const drawer = buildNastyDrawer(entries, 'nasty-drawer');
 
   overlay.append(formPanel, cardPanel, drawer);
   return overlay;
@@ -389,9 +409,9 @@ function legendFor(context: ControlContext): string {
   // buttons for A/B/C. Show the real keys so the prompt matches what actually works.
   switch (context) {
     case 'HUDDLE':
-      return 'Huddle: [A=J]/[B=K]/[C=L] Call Play · [C=L] Nasty Drawer';
+      return 'Huddle: [A=J]/[B=K]/[C=L] Call Play';
     case 'PRE_SNAP':
-      return 'Pre-Snap: [C=L] Hike';
+      return 'Pre-Snap: [C=L] Hike · [A=J] Audible · [A→C → A/B/C] Nasty';
     case 'PASSING':
       return 'Passing: [A=J]/[B=K]/[C=L] Throw · WASD lead receiver';
     case 'CARRIER':

@@ -17,7 +17,8 @@ import {
   type InputSnapshot,
   type ArcadeButton,
 } from '@monster-league/shared-core';
-import { GameSession } from '../sim/index';
+import { GameSession, type AudibleController, type Button } from '../sim/index';
+import { resetNotice, resetRouter, type NastyNoticeKind } from './preSnapRouter';
 import { drawFieldSprites, drawField, drawHazards, hazardStateKey } from './fieldRenderer';
 import type { DrawSurface } from './fieldRenderer';
 import { stepCamera, clampFocus, INITIAL_CAMERA } from './cameraRig';
@@ -28,6 +29,7 @@ import {
   clearBannerIfNotActive,
   syncHud,
   syncHuddle,
+  syncNastyOverlay,
 } from './hudBridge';
 import type { LivePlay, LivePlayResult } from '../field/LivePlay';
 import { HazardManager } from '../field/HazardManager';
@@ -72,6 +74,14 @@ export class MatchScene extends Phaser.Scene {
   bannerText = '';
   bannerKind: BannerKind = 'NEUTRAL';
   bannerTimer = 0;
+  /** Pre-snap combo router state (see preSnapRouter.ts). */
+  audible: AudibleController | null = null;
+  audibleClock = 0;
+  audibleCombo: Button[] = [];
+  audiblePlayId: string | null = null;
+  nastyNotice = '';
+  nastyNoticeKind: NastyNoticeKind | null = null;
+  nastyNoticeTimer = 0;
   /** Set once the session reaches GAME_OVER; disables play selection + dismiss. */
   gameOver = false;
   highlightDefender = -1;
@@ -368,6 +378,9 @@ export class MatchScene extends Phaser.Scene {
     this.bannerText = '';
     this.bannerKind = 'NEUTRAL';
     this.bannerTimer = 0;
+    this.audiblePlayId = null;
+    resetRouter(this);
+    resetNotice(this);
     this.highlightDefender = -1;
     this.isPassPlay = false;
     this.isKickPlay = false;
@@ -601,6 +614,8 @@ export class MatchScene extends Phaser.Scene {
       huddleFingerprint: this.huddleFingerprint,
       isPassPlay: this.isPassPlay,
       windowsOpen: this.windowsOpen,
+      nastyNotice: this.nastyNotice,
+      nastyNoticeKind: this.nastyNoticeKind,
     };
     const { readyText, controlLine, promptLine } = composeReadyLine(hudState);
     this.huddleFingerprint = hudState.huddleFingerprint;
@@ -618,9 +633,12 @@ export class MatchScene extends Phaser.Scene {
       kickLocked: this.kickLocked,
       cpuPlayId: this.cpuPlayId,
       huddleFingerprint: this.huddleFingerprint,
+      nastyNotice: this.nastyNotice,
+      nastyNoticeKind: this.nastyNoticeKind,
     };
     updateScorebug(document, this.session);
     syncHud(document, this.session);
+    syncNastyOverlay(document, hudState);
     syncHuddle(document, hudState); // mutates hudState.huddleFingerprint in place
     this.huddleFingerprint = hudState.huddleFingerprint;
     const prompt = document.querySelector('.gsn-control-bar__prompt');
