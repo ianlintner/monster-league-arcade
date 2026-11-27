@@ -1,4 +1,4 @@
-import { AudioManager } from '@monster-league/shared-core';
+import { AudioManager, InputManager, mountTouchControls } from '@monster-league/shared-core';
 import { initChrome } from './chrome';
 import { unlockOnFirstGesture, wireMuteControls } from './audioControls';
 import { bootFootball, buildScorebug } from '@monster-league/football';
@@ -35,7 +35,13 @@ audio.attachAutoUnlock();
 wireMuteControls(audio);
 
 const host = document.getElementById('game');
-if (host) bootFootball(host, { production: import.meta.env.PROD, audio });
+if (host) {
+  // One manager per page: the scene polls it, the on-screen pad presses it, and
+  // the keyboard listener the scene attaches feeds the same instance.
+  const input = new InputManager();
+  mountTouchControls({ input });
+  bootFootball(host, { production: import.meta.env.PROD, audio, input });
+}
 
 // Integer-scale the 640×360 backing canvas to the largest nearest-neighbour
 // multiple that fits both viewport and bezel (e.g. 2x at a roomy 1280-wide

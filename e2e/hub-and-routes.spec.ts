@@ -32,6 +32,18 @@ test('hub navigates to both games and back', async ({ page }) => {
   await expect(page).toHaveURL(/\/hockey\/$/);
 });
 
+test('hub labels football as the game and hockey as a preview', async ({ page }) => {
+  await page.goto('/');
+  const football = page.getByTestId('card-football');
+  const hockey = page.getByTestId('card-hockey');
+  await expect(football).toHaveText('Play Football');
+  await expect(football).toHaveClass(/gsn-btn--cta/);
+  await expect(hockey).toHaveText('Preview Hockey');
+  await expect(hockey).not.toHaveClass(/gsn-btn--cta/);
+  await expect(hockey.locator('xpath=ancestor::article')).toHaveAttribute('data-status', 'preview');
+  await expect(page.locator('article[data-status="preview"]')).toContainText('Preview');
+});
+
 test('hub roster inspector and CRT toggle work', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /Rotting Deadskins/ }).click();

@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- grandfathered MVP core (ARCHITECTURE.md "File-size ceiling"); split along existing seams when touched, not speculatively. */
 /**
  * MatchScene — the live-play field experience for Halloween Monster League
  * Football. Replaces the static preview gridiron: it boots a full `GameSession`,
@@ -61,6 +62,9 @@ export class MatchScene extends Phaser.Scene {
   static isProduction = false;
   /** Audio sink handed in by `bootFootball` (null = silent, e.g. tests). */
   static audioSink: AudioSink | null = null;
+  /** Page-owned input manager for the on-screen touch pad (null = scene-owned).
+   *  Set by `bootFootball` before Phaser constructs the scene, like `audioSink`. */
+  static inputOverride: InputManager | null = null;
 
   /** Cue player over the sink; also the read-only `__mlf.audio()` source. */
   audio: MatchAudio = new MatchAudio(MatchScene.audioSink);
@@ -241,7 +245,7 @@ export class MatchScene extends Phaser.Scene {
 
   /** Unified Genesis 3-button + 360° input (keyboard/gamepad/touch). All game
    *  input flows through this one source of truth — no raw Phaser key polling. */
-  private inputManager = new InputManager();
+  private inputManager = MatchScene.inputOverride ?? new InputManager();
   /** Latest polled snapshot for the human player (P1, slot 0). */
   playerInput: InputSnapshot = {
     x: 0,

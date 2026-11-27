@@ -1,5 +1,5 @@
 import * as Phaser from 'phaser';
-import { HALLOWEEN_MIDNIGHT_PALETTE as P } from '@monster-league/shared-core';
+import { HALLOWEEN_MIDNIGHT_PALETTE as P, type InputManager } from '@monster-league/shared-core';
 import { MatchScene, CANVAS_WIDTH, CANVAS_HEIGHT } from './scenes/MatchScene';
 import type { AudioSink } from './scenes/matchAudio';
 
@@ -17,10 +17,13 @@ export { cuesForPlayResult, cuesForNasty, MatchAudio } from './scenes/matchAudio
 
 export function bootFootball(
   parent: HTMLElement,
-  opts?: { production?: boolean; audio?: AudioSink },
+  opts?: { production?: boolean; audio?: AudioSink; input?: InputManager },
 ): Phaser.Game {
   MatchScene.isProduction = opts?.production ?? false;
   MatchScene.audioSink = opts?.audio ?? null;
+  // Optional page-owned manager: on-screen touch buttons drive the very same
+  // instance the scene polls. Null keeps the scene self-contained in tests.
+  MatchScene.inputOverride = opts?.input ?? null;
   return new Phaser.Game({
     type: Phaser.CANVAS,
     parent,
