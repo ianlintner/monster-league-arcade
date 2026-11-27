@@ -7,7 +7,7 @@
  * The frame-by-frame sim loop (matchSim), outcome commit/banner (matchOutcome)
  * and this state machine together replace the former scene methods.
  */
-import type { GameSession, HazardHit } from '../sim/index';
+import type { GameSession, HazardHit, NastyKind } from '../sim/index';
 import { getOffensePlay } from '../sim/index';
 import { buildLivePlayInput } from '../field/fieldMapper';
 import type { ArcadeButton, InputSnapshot } from '@monster-league/shared-core';
@@ -18,9 +18,10 @@ import type { BannerKind } from '../ui/hud';
 import type { ActorAnimation, ActorPresentationState } from './spriteRenderer';
 import { updateLive, commitPass } from './matchSim';
 import { settleExpiredPeriod, updateBanner } from './matchOutcome';
-import { cpuOnOffense, cpuCallOffense } from './cpuOpponent';
+import { CPU_TEAM, cpuOnOffense, cpuCallOffense } from './cpuOpponent';
 import { assignDefaultDefender } from './defenseInput';
 import {
+  cpuCallNasty,
   menuOpen,
   resetRouter,
   tickNotice,
@@ -93,6 +94,8 @@ export interface MatchRuntime extends PreSnapRuntime {
    *  `prepareLivePlay`. Set the moment the CPU calls its play, so the CPU-huddle
    *  overlay can name it before the play is actually selected. */
   cpuPlayId: string | null;
+  /** The nasty the coach armed alongside `cpuPlayId` (spent via `callNasty` at confirm). */
+  cpuNasty: NastyKind | null;
   /** When the CPU finishes its huddle and selects the play (wall-clock reference),
    *  set at CPU pick time while the "CPU OFFENSE" overlay is showing. */
   cpuHuddleClock: number;
@@ -172,6 +175,7 @@ export class MatchController {
   confirmPlay(index: number): void {
     this.s.selectedPlayIndex = index;
     this.s.cpuPlayId = null;
+    this.s.cpuNasty = null;
     this.s.audiblePlayId = null;
     resetRouter(this.s);
     this.s.session.selectPlays(catalogForDown(this.s.session.down)[index]!.id, DEFAULT_DEFENSE);
@@ -193,6 +197,9 @@ export class MatchController {
     if (!this.s.cpuPlayId) return;
     const playId = this.s.cpuPlayId;
     this.s.session.selectPlays(playId, DEFAULT_DEFENSE);
+    // The cheating coach spends the same once-per-half charge as the human, through
+    // the same `callNasty` path, before the field effects are primed below.
+    if (this.s.cpuNasty) cpuCallNasty(this.s, CPU_TEAM, this.s.cpuNasty);
     this.s.mode = 'PRE_SNAP';
     // Readable beat before the CPU snaps: ~0.8–1.2 s in PRE_SNAP.
     this.s.cpuSnapClock = performance.now() + 800 + (playId.length % 5) * 100;
@@ -208,6 +215,7 @@ export class MatchController {
       if (this.s.cpuPlayId === null) {
         const decision = cpuCallOffense(this.s.session);
         this.s.cpuPlayId = decision.offensePlayId;
+        this.s.cpuNasty = decision.nasty;
         this.s.cpuHuddleClock = performance.now() + 800 + (decision.offensePlayId.length % 5) * 100;
         // Stay in PICK so the CPU-offense overlay renders before the snap beat.
       } else if (performance.now() >= this.s.cpuHuddleClock) {
@@ -217,6 +225,7 @@ export class MatchController {
     }
     // Human offense: clear any stale CPU override before the A/B/C pick list.
     this.s.cpuPlayId = null;
+    this.s.cpuNasty = null;
     // The pick list depends on the down: 4th down offers special teams (punt/FG).
     const catalog = catalogForDown(this.s.session.down);
     if (this.s.pressedBtn('A')) this.s.selectedPlayIndex = 0;

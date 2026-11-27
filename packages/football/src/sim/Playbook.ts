@@ -860,7 +860,7 @@ export function nastyMenu(
   return [first, 'BAT_WING_JET_BOOST', 'GHOUL_GAS'];
 }
 
-export type AudibleState = 'IDLE' | 'AUDIBLE_MENU' | 'NASTY_MENU' | 'DONE';
+export type AudibleState = 'IDLE' | 'AUDIBLE_MENU' | 'NASTY_MENU' | 'REF_MENU' | 'DONE';
 
 export type AudibleSelection =
   { kind: 'STANDARD'; playId: string } | { kind: 'NASTY'; nasty: NastyKind } | { kind: 'CANCEL' };
@@ -871,6 +871,8 @@ export type AudibleSelection =
  *   A -> C -> A/B/C Nasty Audible (pick one of three dirty tricks)
  * Inside AUDIBLE_MENU, A and B select alternates 1 and 2 (B does not cancel);
  * C opens the Nasty menu. Inside NASTY_MENU, A/B/C pick slots 1/2/3.
+ *   B -> A/B/C      ref menu (ML-NEXT D2): A = Bribe Ref, B = Kill Ref, C = cancel
+ * Works for either side of the ball (both ref tricks are `NASTY_SIDE: 'ANY'`).
  */
 export class AudibleController {
   state: AudibleState = 'IDLE';
@@ -893,7 +895,12 @@ export class AudibleController {
       case 'IDLE':
       case 'DONE':
         if (button === 'A') this.state = 'AUDIBLE_MENU';
+        else if (button === 'B') this.state = 'REF_MENU';
         return null;
+      case 'REF_MENU':
+        this.state = 'DONE';
+        if (button === 'C') return { kind: 'CANCEL' };
+        return { kind: 'NASTY', nasty: button === 'A' ? 'BRIBE_REF' : 'KILL_REF' };
       case 'AUDIBLE_MENU': {
         if (button === 'C') {
           this.state = 'NASTY_MENU';

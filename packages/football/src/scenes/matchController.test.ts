@@ -5,6 +5,7 @@ import { updateBanner } from './matchOutcome';
 import { GameSession } from '../sim/GameSession';
 import { getOffensePlay } from '../sim/Playbook';
 import { cpuOnOffense } from './cpuOpponent';
+import { NastyFieldEffects } from '../field/NastyFieldEffects';
 
 /**
  * Regression guard for the CPU-opponent state machine (PR #18 review finding):
@@ -27,6 +28,7 @@ function makeRuntime(session: GameSession): MatchRuntime {
     mode: 'PICK',
     selectedPlayIndex: 0,
     cpuPlayId: null,
+    cpuNasty: null,
     cpuHuddleClock: 0,
     cpuSnapClock: 0,
     cpuPassClock: 0,
@@ -195,6 +197,31 @@ describe('MatchController CPU offense cycle', () => {
     expect(s.mode).toBe('PRE_SNAP');
     expect(s.session.phase).toBe('PRE_SNAP');
     expect(s.isKickPlay).toBe(true);
+  });
+
+  it('the cheating CPU arms the coach nasty through callNasty and never exceeds its charges', () => {
+    const s = makeRuntime(awaySession());
+    s.nastyFields = new NastyFieldEffects();
+    const c = new MatchController(s);
+
+    // Down 1: the coach's nasty is armed at call time and spent at select time.
+    s.cpuPlayId = 'QUICK_SLANTS';
+    s.cpuNasty = 'BAT_WING_JET_BOOST';
+    s.cpuHuddleClock = 0;
+    c.updateMode(0);
+    expect(s.mode).toBe('PRE_SNAP');
+    expect(s.session.nastyLog).toEqual([{ team: 'away', kind: 'BAT_WING_JET_BOOST', half: 1 }]);
+    expect(s.session.charges.available('away', 'BAT_WING_JET_BOOST', 1)).toBe(false);
+    expect(s.nastyNotice).toContain('CPU NASTY');
+    expect(s.session.effects.active).toContain('BAT_WING_JET_BOOST');
+
+    // Down 2 in the same half: the same trick is refused — no extra charges.
+    s.session.phase = 'HUDDLE_PLAYCALL';
+    s.cpuPlayId = 'QUICK_SLANTS';
+    s.cpuNasty = 'BAT_WING_JET_BOOST';
+    s.cpuHuddleClock = 0;
+    c.updateMode(0);
+    expect(s.session.nastyLog).toHaveLength(1);
   });
 
   it('advances the period when the between-plays clock expires in the huddle (QA freeze)', () => {

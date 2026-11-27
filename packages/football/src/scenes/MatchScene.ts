@@ -17,7 +17,7 @@ import {
   type InputSnapshot,
   type ArcadeButton,
 } from '@monster-league/shared-core';
-import { GameSession, type AudibleController, type Button } from '../sim/index';
+import { GameSession, type AudibleController, type Button, type NastyKind } from '../sim/index';
 import { resetNotice, resetRouter, type NastyNoticeKind } from './preSnapRouter';
 import { drawFieldSprites, drawField, drawHazards, hazardStateKey } from './fieldRenderer';
 import type { DrawSurface } from './fieldRenderer';
@@ -158,6 +158,8 @@ export class MatchScene extends Phaser.Scene {
   /** CPU offense override: the away team's chosen play id this down (null while
    *  the human calls its own play). See `matchController.MatchRuntime`. */
   cpuPlayId: string | null = null;
+  /** The nasty the CPU coach armed with `cpuPlayId` (null = none). */
+  cpuNasty: NastyKind | null = null;
   /** Wall-clock reference for when the CPU finishes its huddle and selects the play. */
   cpuHuddleClock = 0;
   /** Wall-clock reference for when the CPU snaps after its PRE_SNAP beat. */
@@ -385,6 +387,7 @@ export class MatchScene extends Phaser.Scene {
     this.isPassPlay = false;
     this.isKickPlay = false;
     this.cpuPlayId = null;
+    this.cpuNasty = null;
     this.cpuHuddleClock = 0;
     this.cpuSnapClock = 0;
     this.cpuPassClock = 0;
@@ -632,6 +635,7 @@ export class MatchScene extends Phaser.Scene {
       isKickPlay: this.isKickPlay,
       kickLocked: this.kickLocked,
       cpuPlayId: this.cpuPlayId,
+      cpuNasty: this.cpuNasty,
       huddleFingerprint: this.huddleFingerprint,
       nastyNotice: this.nastyNotice,
       nastyNoticeKind: this.nastyNoticeKind,

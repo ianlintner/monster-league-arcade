@@ -255,6 +255,8 @@ export function buildCpuHuddleOverlay(opts: {
   playName: string;
   kind: 'RUN' | 'PASS' | 'PUNT' | 'FIELD_GOAL';
   formation: string;
+  /** Display name of the dirty trick the coach armed with this call (omitted = none). */
+  nasty?: string;
 }): HTMLElement {
   const overlay = el('div', 'gsn-huddle gsn-huddle--cpu');
   overlay.setAttribute('data-testid', 'huddle-overlay');
@@ -272,6 +274,11 @@ export function buildCpuHuddleOverlay(opts: {
   );
 
   overlay.append(head, card);
+  if (opts.nasty) {
+    const trick = el('div', 'gsn-huddle__cpu-nasty', `NASTY: ${opts.nasty.toUpperCase()}`);
+    trick.setAttribute('data-testid', 'cpu-nasty');
+    overlay.append(trick);
+  }
   return overlay;
 }
 

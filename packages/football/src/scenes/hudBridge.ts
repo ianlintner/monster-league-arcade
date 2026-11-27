@@ -18,8 +18,8 @@ import {
   losLabel,
 } from '../ui/hud';
 import type { FactionId } from '@monster-league/shared-core';
-import type { GameSession } from '../sim/index';
-import { getOffensePlay, nastyMenu } from '../sim/index';
+import type { GameSession, NastyKind } from '../sim/index';
+import { NASTY_INFO, getOffensePlay, nastyMenu } from '../sim/index';
 import { HUMAN_TEAM } from './preSnapRouter';
 
 /** Play kind, mirroring MatchScene's `PlayKind` (kept local to avoid importing the
@@ -36,6 +36,8 @@ export interface HudState {
   /** The CPU's chosen offense play id while the away team has the ball in its
    *  huddle (null on human downs and on defense). Drives the CPU-offense overlay. */
   cpuPlayId: string | null;
+  /** The nasty the CPU coach armed with its play (named in the CPU huddle overlay). */
+  cpuNasty?: NastyKind | null;
   /** Fingerprint of the last huddle overlay build; mutated in place on rebuild. */
   huddleFingerprint: string;
   /** Live pass play / receiving windows open (optional: absent = false). */
@@ -81,8 +83,8 @@ function composePrompt(s: HudState, down: string): string {
     }
     case 'PRE_SNAP':
       return onDefense
-        ? `Defense: CPU snaps shortly — [A=J] Audible · [A→C → A/B/C] Nasty · ${down}`
-        : `Pre-Snap: [C=L] Hike · [A=J] Audible · [A→C → A/B/C] Nasty · ${down}`;
+        ? `Defense: CPU snaps shortly — [A=J] Audible · [A→C → A/B/C] Nasty · [B=K → A/B] Ref · ${down}`
+        : `Pre-Snap: [C=L] Hike · [A=J] Audible · [A→C → A/B/C] Nasty · [B=K → A/B] Ref · ${down}`;
     case 'LIVE':
       if (s.isKickPlay) {
         return s.kickLocked === null
@@ -181,11 +183,19 @@ export function syncHud(doc: Document, session: GameSession): void {
     const bribed = s.ref.isBribed ? s.ref.bribedBy : null;
     bribe.setAttribute('data-active', String(bribed !== null));
     if (bribed) {
+      bribe.removeAttribute('data-kind');
       const id = (f: string): FactionId => f.toLowerCase() as FactionId;
       const briber = id(s.roster[bribed].faction);
       const victim = id(s.roster[bribed === 'home' ? 'away' : 'home'].faction);
       bribe.textContent = `BRIBED REF · ${factionName(briber)} paid · flags ${factionName(victim)}`;
+    } else if (s.ref.huntedBy) {
+      // Kill Ref: the hunt is visible on the same badge until the whistle resolves it.
+      const hunter = s.roster[s.ref.huntedBy].faction.toLowerCase() as FactionId;
+      bribe.setAttribute('data-active', 'true');
+      bribe.setAttribute('data-kind', 'hunt');
+      bribe.textContent = `REF HUNT · ${factionName(hunter)} is hunting the Necro-Ref`;
     } else {
+      bribe.removeAttribute('data-kind');
       bribe.textContent = '';
     }
   }
@@ -207,11 +217,17 @@ export function syncHuddle(doc: Document, s: HudState): void {
   // fingerprint is keyed on the play id so a new down's play rebuilds the overlay.
   if (s.cpuPlayId) {
     const play = getOffensePlay(s.cpuPlayId);
-    const fingerprint = `cpu:${s.cpuPlayId}`;
+    const nasty = s.cpuNasty ? NASTY_INFO[s.cpuNasty].name : undefined;
+    const fingerprint = `cpu:${s.cpuPlayId}:${s.cpuNasty ?? ''}`;
     if (fingerprint === s.huddleFingerprint) return;
     s.huddleFingerprint = fingerprint;
     host.replaceChildren(
-      buildCpuHuddleOverlay({ playName: play.name, kind: play.kind, formation: play.formation }),
+      buildCpuHuddleOverlay({
+        playName: play.name,
+        kind: play.kind,
+        formation: play.formation,
+        ...(nasty ? { nasty } : {}),
+      }),
     );
     host.hidden = false;
     return;

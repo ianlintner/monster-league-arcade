@@ -108,6 +108,45 @@ describe('playbook', () => {
     c.press('C');
     expect(c.press('C')).toEqual({ kind: 'NASTY', nasty: 'HEX_OF_CONFUSION' });
   });
+  it('ref menu B->A/B/C: bribe, kill, cancel (both sides of the ball)', () => {
+    for (const [side, id, kind] of [
+      ['OFFENSE', 'INSIDE_GORE_RUN', 'RUN'],
+      ['DEFENSE', 'BONE_CRUSH_BASE', null],
+    ] as const) {
+      const mk = () => new AudibleController(side, id, kind);
+      const bribe = mk();
+      expect(bribe.press('B')).toBeNull();
+      expect(bribe.state).toBe('REF_MENU');
+      expect(bribe.press('A')).toEqual({ kind: 'NASTY', nasty: 'BRIBE_REF' });
+      expect(bribe.state).toBe('DONE');
+      const kill = mk();
+      kill.press('B');
+      expect(kill.press('B')).toEqual({ kind: 'NASTY', nasty: 'KILL_REF' });
+      const cancel = mk();
+      cancel.press('B');
+      expect(cancel.press('C')).toEqual({ kind: 'CANCEL' });
+      expect(cancel.state).toBe('DONE');
+    }
+    // Existing combos are unchanged and a bare C from IDLE is inert.
+    const idle = new AudibleController('OFFENSE', 'INSIDE_GORE_RUN', 'RUN');
+    expect(idle.press('C')).toBeNull();
+    expect(idle.state).toBe('IDLE');
+  });
+  it('session B->A bribes the ref once per half; flags render as a bogus-penalty banner', () => {
+    const g = start();
+    setup(g, 'INSIDE_GORE_RUN');
+    g.audible('home', ['B', 'A']);
+    expect(g.ref.isBribed).toBe(true);
+    expect(g.ref.bribedBy).toBe('home');
+    expect(g.callNasty('home', 'BRIBE_REF')).toEqual({
+      ok: false,
+      reason: 'ALREADY_USED_THIS_HALF',
+    });
+    expect(g.nastyLog).toEqual([{ team: 'home', kind: 'BRIBE_REF', half: g.half }]);
+    const r = g.snap({ force: { yards: 3, fumble: false, tackleDamage: 1 } });
+    expect(r.penalties.some((p) => p.kind === 'BRIBE')).toBe(true);
+    expect(r.banner.toUpperCase()).toContain('YARDS —');
+  });
   it('session audible swaps play and fires nasty', () => {
     const g = start();
     setup(g, 'QUICK_SLANTS');

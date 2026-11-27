@@ -100,6 +100,8 @@ export function updateLive(s: MatchRuntime, dt: number): void {
       carrierTeam: carrier0?.team ?? s.session.possession,
       carrierSlot: carrier0?.slot ?? 'RB1',
     });
+    // The hunt lives on the session's ref; patch it onto the per-step snapshot.
+    s.nastySnap.killRefHunt = s.session.ref.huntedBy !== null;
     pressedBThisTick = false;
 
     // Hex of Confusion inverts the carrier's steering while its timer is live.

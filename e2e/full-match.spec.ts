@@ -48,6 +48,7 @@ test('real-keyboard full match: play to GAME_OVER, see the result, restart with 
   expect((await snap(page)).quarter).toBe(1);
 
   const deadline = Date.now() + 240_000;
+  let calledNasty = false;
   for (;;) {
     const s = await snap(page);
     if (s.phase === 'GAME_OVER') break;
@@ -68,6 +69,14 @@ test('real-keyboard full match: play to GAME_OVER, see the result, restart with 
       await tap(page, s.down >= 4 ? P1.C : P1.A);
       await page.waitForTimeout(80);
     } else if (s.mode === 'PRE_SNAP') {
+      if (!calledNasty) {
+        // One real-key Bribe Ref (B→A) before the first hike: the match must see a nasty.
+        calledNasty = true;
+        await tap(page, P1.B);
+        await page.waitForTimeout(120);
+        await tap(page, P1.A);
+        await page.waitForTimeout(150);
+      }
       await tap(page, P1.C); // snap
       await page.waitForTimeout(80);
     } else if (s.mode === 'LIVE') {
@@ -78,6 +87,14 @@ test('real-keyboard full match: play to GAME_OVER, see the result, restart with 
       await page.waitForTimeout(150); // BANNER: let the whistle banner run out
     }
   }
+
+  // At least one nasty was called over the match (the human's bribe, plus any the CPU armed).
+  const nastyCount = await page.evaluate(
+    () =>
+      (window as unknown as { __mlf: { session: { nastyLog: unknown[] } } }).__mlf.session.nastyLog
+        .length,
+  );
+  expect(nastyCount).toBeGreaterThanOrEqual(1);
 
   // The final result is on screen, inside the 1280x720 viewport.
   const card = page.getByTestId('result-card');
